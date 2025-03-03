@@ -1,0 +1,16 @@
+{
+  "name": "GranularToken",
+  "symbol": "TST",
+  "decimals": 9,
+  "mintAddress": "EqxQpFqBGjTD4qMsk7SvTkVX6q4nZiryS9msFh2ejL3Y",
+  "extensions": [
+    "TransferFeeConfig",
+    "InterestBearingConfig"
+  ],
+  "createdAt": "2025-03-03T16:13:21.896Z",
+  "distributionInfo": {
+    "totalDistributed": 0.010000000000000002,
+    "distributedWallets": 10,
+    "distributionDate": "2025-03-03T16:18:45.354Z"
+  }
+}

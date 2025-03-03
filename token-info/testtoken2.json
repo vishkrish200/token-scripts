@@ -1,0 +1,16 @@
+{
+  "name": "TestToken2",
+  "symbol": "TST",
+  "decimals": 9,
+  "mintAddress": "FGC8yk5C3T1MooGNnM26YrmKJnrq2u4PXwNargFZXcWU",
+  "extensions": [
+    "TransferFeeConfig",
+    "InterestBearingConfig"
+  ],
+  "createdAt": "2025-03-03T14:41:41.093Z",
+  "distributionInfo": {
+    "totalDistributed": 0,
+    "distributedWallets": 0,
+    "distributionDate": "2025-03-03T15:53:43.478Z"
+  }
+}

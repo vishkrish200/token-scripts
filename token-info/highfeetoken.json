@@ -1,0 +1,19 @@
+{
+  "name": "HighFeeToken",
+  "symbol": "HFT",
+  "decimals": 9,
+  "mintAddress": "CSvkafU4e3Jb2VxRjWR8xUDiNREL9826eRBXB3mbFE22",
+  "extensions": [
+    "TransferFeeConfig"
+  ],
+  "transferFee": {
+    "feeBasisPoints": 400,
+    "maxFee": "0"
+  },
+  "createdAt": "2025-03-03T16:53:24.214Z",
+  "distributionInfo": {
+    "totalDistributed": 0,
+    "distributedWallets": 0,
+    "distributionDate": "2025-03-03T16:53:49.099Z"
+  }
+}
