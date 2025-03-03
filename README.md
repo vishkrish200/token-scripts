@@ -1,175 +1,111 @@
-# Solana Token Scripts
+# Token Scripts
 
-A collection of scripts for launching and managing a token on the Solana blockchain using the Token 2022 program.
+A collection of scripts for creating and managing tokens on the Solana blockchain, with a focus on tokens with high transfer fees.
 
 ## Features
 
-- Environment-specific configuration (local, testnet, mainnet)
-- Wallet management (creation, balance checking, airdrops)
-- Token creation with Token 2022 program
-- Support for Token 2022 extensions:
-  - Transfer Fee
-  - Interest Bearing
-  - Non-Transferable
-  - Permanent Delegate
-- Bulk operations:
-  - Create multiple wallets (up to 100+)
-  - Fund multiple wallets efficiently
-  - Distribute tokens to multiple wallets
+- Create tokens with high transfer fees (4%)
+- Distribute tokens to multiple wallets
+- Transfer tokens between wallets
+- Check for withheld fees in token accounts
+- Harvest and withdraw withheld fees
+- Create liquidity pools and swap tokens on DEXs (experimental)
 
-## Prerequisites
+## Scripts
 
-- Node.js (v16 or higher)
-- npm or yarn
-- Solana CLI (optional, for local validator)
-
-## Installation
-
-1. Clone the repository:
-   ```
-   git clone <repository-url>
-   cd token-scripts
-   ```
-
-2. Install dependencies:
-   ```
-   npm install
-   ```
-
-3. Create a `.env` file based on `.env.example`:
-   ```
-   cp .env.example .env
-   ```
-
-4. Edit the `.env` file with your configuration:
-   - Set your Helius API keys
-   - Configure token parameters
-   - Enable/disable Token 2022 extensions
+- `create-token-with-high-fees`: Create a new token with high transfer fees (4%)
+- `distribute-token`: Distribute tokens to multiple wallets
+- `transfer-between-wallets`: Transfer tokens between wallets to generate fees
+- `check-mint-fees`: Check if there are any fees withheld at the mint level
+- `check-all-token-accounts`: Check all token accounts for a specific mint to find any withheld fees
+- `check-token-extensions`: Check token account extension data
+- `harvest-fees`: Harvest and withdraw fees from token accounts
+- `create-liquidity-pool`: Create a liquidity pool for a token on a DEX (experimental)
+- `swap-tokens`: Swap SOL for tokens on a DEX (experimental)
+- `check-swap-fees`: Check for fees after swapping tokens on a DEX (experimental)
 
 ## Usage
 
-### Environment Selection
+### Create a token with high fees
 
-All scripts can be run in different environments:
-
-- `local`: Local Solana validator
-- `testnet`: Solana testnet
-- `mainnet`: Solana mainnet
-
-### Available Scripts
-
-#### Wallet Management
-
-1. Create a single wallet:
-   ```
-   npm run create-wallet:local
-   ```
-
-2. Create multiple wallets (default: 100):
-   ```
-   npm run create-multiple-wallets:local -- --count=100
-   ```
-
-3. Request an airdrop (local/testnet only):
-   ```
-   npm run airdrop:local -- --wallet=wallet-filename
-   ```
-
-4. Fund multiple wallets efficiently:
-   ```
-   npm run fund-wallets:local -- --source=wallet-filename --amount=0.1 --airdrops=3
-   ```
-
-#### Token Management
-
-1. Create a new token:
-   ```
-   npm run create-token:local -- --wallet=wallet-filename --name=MyToken
-   ```
-
-2. Create and distribute a token to multiple wallets:
-   ```
-   npm run create-distribute-token:local -- --wallet=wallet-filename --name=MyToken --tokenAmount=1000
-   ```
-
-### Complete Token Launch Workflow
-
-1. Create a source wallet:
-   ```
-   npm run create-wallet:local
-   ```
-
-2. Request an airdrop to the source wallet:
-   ```
-   npm run airdrop:local -- --wallet=wallet-filename
-   ```
-
-3. Create multiple wallets:
-   ```
-   npm run create-multiple-wallets:local -- --count=100
-   ```
-
-4. Fund the wallets:
-   ```
-   npm run fund-wallets:local -- --source=wallet-filename --amount=0.1
-   ```
-
-5. Create and distribute a token:
-   ```
-   npm run create-distribute-token:local -- --wallet=wallet-filename --name=MyToken
-   ```
-
-### Running a Local Validator
-
-For local development and testing, you can run a local Solana validator:
-
-```
-solana-test-validator
+```bash
+npm run create-token-with-high-fees:testnet -- --wallet=<wallet-name> --name=<token-name> --symbol=<token-symbol>
 ```
 
-## Project Structure
+### Distribute tokens
 
-```
-token-scripts/
-├── src/
-│   ├── config/           # Configuration files
-│   ├── scripts/          # Executable scripts
-│   │   ├── token/        # Token-related scripts
-│   │   └── wallet/       # Wallet-related scripts
-│   └── utils/            # Utility functions
-├── wallets/              # Generated wallet files (gitignored)
-│   ├── local/            # Local environment wallets
-│   ├── testnet/          # Testnet environment wallets
-│   └── mainnet/          # Mainnet environment wallets
-├── wallet-index/         # Wallet index files
-├── token-info/           # Token information files
-├── .env                  # Environment variables (gitignored)
-├── .env.example          # Example environment variables
-└── package.json          # Project dependencies
+```bash
+npm run distribute-token:testnet -- --wallet=<wallet-name> --mint=<mint-address> --name=<token-name> --tokenAmount=<amount>
 ```
 
-## Data Storage
+### Transfer tokens between wallets
 
-- **Wallets**: Individual wallet keypairs are stored in the `wallets/` directory, organized by environment.
-- **Wallet Index**: Information about multiple wallets is stored in the `wallet-index/` directory.
-- **Token Information**: Details about created tokens are stored in the `token-info/` directory.
+```bash
+npm run transfer-between-wallets:testnet -- --wallet=<wallet-name> --mint=<mint-address> --name=<token-name> --amount=<amount> --count=<count>
+```
 
-## Token 2022 Extensions
+### Check for withheld fees
 
-The Token 2022 program offers several extensions that can be enabled in the `.env` file:
+```bash
+npm run check-all-token-accounts:testnet -- --wallet=<wallet-name> --mint=<mint-address> --name=<token-name>
+```
 
-- **Transfer Fee**: Enables a fee on token transfers
-- **Interest Bearing**: Tokens accrue interest over time
-- **Non-Transferable**: Tokens cannot be transferred between wallets
-- **Permanent Delegate**: A permanent authority that can transfer tokens from any account
+### Harvest fees
 
-## Security Considerations
+```bash
+npm run harvest-fees:testnet -- --wallet=<wallet-name> --mint=<mint-address> --name=<token-name>
+```
 
-- Wallet files contain sensitive information. Keep them secure and backed up.
-- Never commit `.env` files or wallet files to version control.
-- Use small amounts for testing on testnet.
-- Thoroughly test all scripts before using on mainnet.
+### Create a liquidity pool (experimental)
+
+```bash
+npm run create-liquidity-pool:devnet -- --wallet=<wallet-name> --mint=<mint-address> --name=<token-name> --sol-amount=<amount> --token-amount=<amount>
+```
+
+### Swap tokens on a DEX (experimental)
+
+```bash
+npm run swap-tokens:devnet -- --wallet=<wallet-name> --mint=<mint-address> --name=<token-name> --amount=<amount> --slippage=<percentage>
+```
+
+### Check for fees after swapping (experimental)
+
+```bash
+npm run check-swap-fees:devnet -- --wallet=<wallet-name> --mint=<mint-address> --name=<token-name>
+```
+
+## Findings
+
+During our testing, we found that:
+
+1. We can successfully create tokens with high transfer fees (4%) on the Solana testnet.
+2. We can distribute tokens to multiple wallets.
+3. We can transfer tokens between wallets.
+4. However, the transfer fees are not being withheld in the token accounts or at the mint level.
+
+This could be due to several reasons:
+
+1. The Solana testnet might not fully support the transfer fee extension.
+2. There might be an issue with how the transfer fee extension is being initialized.
+3. The transfer fee might be applied but not withheld for later collection.
+
+## Alternative Approach: DEX Integration
+
+As an alternative approach to collecting fees, we've implemented experimental scripts to:
+
+1. Create a liquidity pool for the token on a DEX
+2. Swap SOL for tokens through the DEX
+3. Check if fees are withheld after swapping
+
+This approach might be more effective for fee collection as DEXs often handle token transfers differently than direct transfers.
+
+## Next Steps
+
+1. Test on the Solana mainnet to see if the transfer fee extension works as expected.
+2. Investigate the Solana documentation and examples for transfer fee extension.
+3. Modify the token creation script to ensure the transfer fee extension is properly initialized.
+4. Explore DEX integration for more reliable fee collection.
 
 ## License
 
-[MIT](LICENSE) 
+MIT 

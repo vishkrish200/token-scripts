@@ -105,4 +105,24 @@ export const listWallets = (): string[] => {
   return fs.readdirSync(walletDir)
     .filter(file => file.endsWith('.json'))
     .map(file => file.replace('.json', ''));
+};
+
+/**
+ * Load all wallet keypairs
+ * @returns An array of loaded keypairs
+ */
+export const loadAllWallets = (): Keypair[] => {
+  const walletFiles = listWallets();
+  const wallets: Keypair[] = [];
+  
+  for (const walletFile of walletFiles) {
+    try {
+      const keypair = loadKeypair(walletFile);
+      wallets.push(keypair);
+    } catch (error) {
+      console.error(`Error loading wallet ${walletFile}:`, error);
+    }
+  }
+  
+  return wallets;
 }; 

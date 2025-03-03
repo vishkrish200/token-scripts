@@ -15,7 +15,8 @@ import {
   createTransferCheckedWithFeeInstruction,
   createTransferCheckedInstruction,
   getMint,
-  ExtensionType
+  ExtensionType,
+  getTransferFeeConfig
 } from '@solana/spl-token';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,6 +39,10 @@ interface TokenInfo {
   decimals: number;
   mintAddress: string;
   extensions: string[];
+  transferFee?: {
+    feeBasisPoints: number;
+    maxFee: string;
+  };
   createdAt: string;
   distributionInfo?: {
     totalDistributed: number;
@@ -119,14 +124,30 @@ async function main() {
     const amountPerWalletArg = process.argv.find(arg => arg.startsWith('--tokenAmount='))?.split('=')[1];
     let amountPerWallet = amountPerWalletArg 
       ? parseInt(amountPerWalletArg, 10) 
-      : 1000;
+      : 1;
     
-    // Adjust for decimals - make sure this is a much smaller amount
-    // We're using a smaller amount to ensure we have enough tokens to distribute
-    amountPerWallet = amountPerWallet * (10 ** (tokenConfig.decimals - 3)); // Reduce by 1000x
+    // Load token info to get fee configuration
+    const tokenInfoDir = path.resolve(process.cwd(), 'token-info');
+    const tokenInfoPath = path.join(tokenInfoDir, `${tokenName.toLowerCase()}.json`);
+    let tokenInfo: TokenInfo | null = null;
+    
+    if (fs.existsSync(tokenInfoPath)) {
+      tokenInfo = JSON.parse(fs.readFileSync(tokenInfoPath, 'utf-8'));
+    }
+    
+    // Get mint info to use for transfer_checked instructions
+    const mintInfo = await getMint(
+      connection,
+      mintAddress,
+      'confirmed',
+      TOKEN_2022_PROGRAM_ID
+    );
+    
+    // Adjust for decimals
+    const adjustedAmount = BigInt(amountPerWallet) * BigInt(10 ** mintInfo.decimals);
     
     console.log(`\nDistribution Strategy:`);
-    console.log(`- Amount per wallet: ${amountPerWallet / (10 ** tokenConfig.decimals)} tokens`);
+    console.log(`- Amount per wallet: ${amountPerWallet} tokens`);
     console.log(`- Number of wallets: ${walletIndex.length}`);
     
     // Find the token account for the source wallet
@@ -142,16 +163,16 @@ async function main() {
     
     const sourceTokenAccount = sourceTokenAccounts.value[0].pubkey;
     const accountInfo = await connection.getTokenAccountBalance(sourceTokenAccount);
-    console.log(`\nSource wallet token balance: ${accountInfo.value.uiAmount} ${tokenConfig.symbol}`);
+    console.log(`\nSource wallet token balance: ${accountInfo.value.uiAmount} ${tokenInfo?.symbol || 'TST'}`);
     
     // Check if we have enough tokens to distribute
-    const totalNeeded = BigInt(amountPerWallet) * BigInt(walletIndex.length);
+    const totalNeeded = adjustedAmount * BigInt(walletIndex.length);
     const availableAmount = BigInt(accountInfo.value.amount);
     
     if (availableAmount < totalNeeded) {
       console.warn(`\nWarning: Not enough tokens to distribute to all wallets.`);
-      console.warn(`Available: ${accountInfo.value.uiAmount} ${tokenConfig.symbol}`);
-      console.warn(`Required: ${Number(totalNeeded) / (10 ** tokenConfig.decimals)} ${tokenConfig.symbol}`);
+      console.warn(`Available: ${accountInfo.value.uiAmount} ${tokenInfo?.symbol || 'TST'}`);
+      console.warn(`Required: ${Number(totalNeeded) / (10 ** mintInfo.decimals)} ${tokenInfo?.symbol || 'TST'}`);
       
       const proceed = await promptUser('Do you want to proceed with partial distribution? (y/n): ');
       if (proceed.toLowerCase() !== 'y') {
@@ -160,21 +181,12 @@ async function main() {
       }
     }
     
-    // Get mint info to use for transfer_checked instructions
-    const mintInfo = await getMint(
-      connection,
-      mintAddress,
-      'confirmed',
-      TOKEN_2022_PROGRAM_ID
-    );
-
-    // For transfer fee calculation
-    // The transfer fee is set to 100bps (1%) in the token creation
-    const transferFeeBasisPoints = 100; // 100 basis points = 1%
-    
-    if (featureFlags.enableTransferFee) {
+    // Get transfer fee configuration if available
+    let transferFeeBasisPoints = 0;
+    if (tokenInfo?.transferFee) {
+      transferFeeBasisPoints = tokenInfo.transferFee.feeBasisPoints;
       console.log(`\nTransfer Fee Configuration:`);
-      console.log(`- Transfer Fee Basis Points: ${transferFeeBasisPoints} (1%)`);
+      console.log(`- Transfer Fee Basis Points: ${transferFeeBasisPoints} (${transferFeeBasisPoints / 100}%)`);
     }
     
     // Distribute tokens to each wallet
@@ -223,9 +235,9 @@ async function main() {
         }
         
         // Add the appropriate transfer instruction based on token extensions
-        if (featureFlags.enableTransferFee) {
-          // Calculate the expected fee (100bps = 1%)
-          const transferAmount = BigInt(amountPerWallet);
+        if (transferFeeBasisPoints > 0) {
+          // Calculate the expected fee
+          const transferAmount = adjustedAmount;
           const feeBasisPoints = BigInt(transferFeeBasisPoints);
           const expectedFee = (transferAmount * feeBasisPoints) / BigInt(10000);
           
@@ -233,14 +245,14 @@ async function main() {
           console.log(`- Transfer Amount: ${Number(transferAmount) / (10 ** mintInfo.decimals)}`);
           console.log(`- Expected Fee: ${Number(expectedFee) / (10 ** mintInfo.decimals)}`);
           
-          const transferTx = createTransferCheckedWithFeeInstruction(
+          // Use regular transfer instruction for high fee tokens
+          const transferTx = createTransferCheckedInstruction(
             sourceTokenAccount,
             mintAddress,
             destinationTokenAccount,
             publicKey,
             transferAmount,
             mintInfo.decimals,
-            expectedFee, // Pass the calculated expected fee
             [],
             TOKEN_2022_PROGRAM_ID
           );
@@ -253,7 +265,7 @@ async function main() {
             mintAddress,
             destinationTokenAccount,
             publicKey,
-            BigInt(amountPerWallet),
+            adjustedAmount,
             mintInfo.decimals,
             [],
             TOKEN_2022_PROGRAM_ID
@@ -272,9 +284,9 @@ async function main() {
         
         // Update wallet status in the index
         walletIndex[i].tokenAccount = destinationTokenAccount.toBase58();
-        walletIndex[i].tokenBalance = amountPerWallet / (10 ** tokenConfig.decimals);
+        walletIndex[i].tokenBalance = amountPerWallet;
         successCount++;
-        totalDistributed += amountPerWallet / (10 ** tokenConfig.decimals);
+        totalDistributed += amountPerWallet;
         
         // Save the updated index every 10 wallets
         if ((i + 1) % 10 === 0 || i === walletIndex.length - 1) {
@@ -293,12 +305,7 @@ async function main() {
     }
     
     // Update token info with distribution details
-    const tokenInfoDir = path.resolve(process.cwd(), 'token-info');
-    const tokenInfoPath = path.join(tokenInfoDir, `${tokenName.toLowerCase()}.json`);
-    
-    if (fs.existsSync(tokenInfoPath)) {
-      const tokenInfo: TokenInfo = JSON.parse(fs.readFileSync(tokenInfoPath, 'utf-8'));
-      
+    if (tokenInfo) {
       tokenInfo.distributionInfo = {
         totalDistributed,
         distributedWallets: successCount,

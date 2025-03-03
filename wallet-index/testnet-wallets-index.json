@@ -4,79 +4,79 @@
     "publicKey": "5mHi9BLUsSJ7pDHWD4kLdktZBMLtUY5J7zupak4otA6N",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-1-1741011873124.json",
     "funded": true,
-    "tokenAccount": "FLt2MdKs2EfcpxUfapVjJqn1HRTBvWdSYaQY7hbAWRjf",
-    "tokenBalance": 0.001
+    "tokenAccount": "J6obn6Aykr9K18uGHA44LbAeehgxQHtXPq2hWxFs5iP2",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-2-1741011873125",
     "publicKey": "4D94pVHRFo3ifCFAwY3BpEGPb7izVzsrPijdJzqc4AUc",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-2-1741011873125.json",
     "funded": true,
-    "tokenAccount": "CTaBHBtuBbv67JpVJtkBoGX4i4mCvW4qhpvDP8tsGLc8",
-    "tokenBalance": 0.001
+    "tokenAccount": "2dRZYekM2npR5vb2wXbkVGqQ8wZZRBMMbcs6bmD8BaVx",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-3-1741011873126",
     "publicKey": "EeKutGLSX1TTyMrsDxjFmMgqtKSmwZ4uX474Z2u6AiTJ",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-3-1741011873126.json",
     "funded": true,
-    "tokenAccount": "GaBeFFBQJbaDddcDfAUuorzKWnd7VGUYG6UyUYbHMuPA",
-    "tokenBalance": 0.001
+    "tokenAccount": "J1Y9aj6GBjJ38PrKmnQYupYmTYGCHbMbnmeS2dtkSYaw",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-4-1741011873127",
     "publicKey": "8mMqjtUfCHhBzX7Yv4956uTUSgF75DTPxbFb6xi9Hzwa",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-4-1741011873127.json",
     "funded": true,
-    "tokenAccount": "Hkf1WQj4APELFdM4PqjcxkVwruAUZcN4hg4yV9Lt9Dn5",
-    "tokenBalance": 0.001
+    "tokenAccount": "2cca8c94U43TU1eCah2QyB8TRzBhPHv8cFpNcyEuxxuZ",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-5-1741011873132",
     "publicKey": "YLTDeGWJKGtpbHsSazDys7ETENLt9pELyhAxTQdAXvs",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-5-1741011873132.json",
     "funded": true,
-    "tokenAccount": "GxDU8Uhq8PGqzG5NS1ibAfk1kVsbEoi8ypPvSnTpE7bB",
-    "tokenBalance": 0.001
+    "tokenAccount": "D1RaTPrYniKZ6NUEyRfstuEJQzS3gJ6ZvmZ72z7F8X9p",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-6-1741011873132",
     "publicKey": "Fy9QFQjRKyoCUXg6n4czg967nhQTTFYuZzP7aeeDeJUx",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-6-1741011873132.json",
     "funded": true,
-    "tokenAccount": "EQtaiMtGNTAZ8VCtXey6qGAu2baRC9Ng17Xz5Wvf7ub3",
-    "tokenBalance": 0.001
+    "tokenAccount": "BQd1rCMcoyWYekQaW467tLc76nyAV75g4q4cn2dGTdZS",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-7-1741011873133",
     "publicKey": "2szRDegDpvH1vVDDX5kY9Jbv5LfZiUqVqMqsGNqgwW6S",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-7-1741011873133.json",
     "funded": true,
-    "tokenAccount": "7qW4ffQdqFZ5GT6HCMcoXzYFebdCG2CoJ5SxBKnXqsyN",
-    "tokenBalance": 0.001
+    "tokenAccount": "8wansTLF8xYg4K8CM2So9uztyDYNS5WSKqcAc9JT5hRE",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-8-1741011873134",
     "publicKey": "DweQfGv7CvP3bSuNoq8T5YGVcn4ZdAi6QAEL9Tb6aZn4",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-8-1741011873134.json",
     "funded": true,
-    "tokenAccount": "5mdBVKz1TumYFbKnkZ48k9GdU1eURqNBGCdwTVSkL7ya",
-    "tokenBalance": 0.001
+    "tokenAccount": "6yK45bTCmtPUxV3vd7SsFLLEBdSHSbtkUk255h32fx5V",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-9-1741011873135",
     "publicKey": "uvfvHaiSx1VJs1PtV2xL8Zdv93YXkVaJ2Ckek5861sA",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-9-1741011873135.json",
     "funded": true,
-    "tokenAccount": "7xot6jAj9GbgAgMwdCQ8CXqxe9XZCzqZEJcpbqeeoZFj",
-    "tokenBalance": 0.001
+    "tokenAccount": "2KyDGBzcsaRoiSA4Lss4pq7SYAJy9VT18dS55U9cUMVd",
+    "tokenBalance": 10
   },
   {
     "filename": "wallet-10-1741011873136",
     "publicKey": "ZMmvyesZ9Tc1Un8QxdMa6WtzkZ9dKnShZVRYLNMvzJA",
     "path": "/Users/vishnukrishnan/Developer/token-scripts/wallets/testnet/wallet-10-1741011873136.json",
     "funded": true,
-    "tokenAccount": "37X998r5PgjC6TQuWRiahLoJmfqpoiqhTbKKHcgEysgD",
-    "tokenBalance": 0.001
+    "tokenAccount": "CGhkPPpZBcB3BHKTcg4pbVdx9qEXnVBGiyRWaPdrHttc",
+    "tokenBalance": 10
   }
 ]
