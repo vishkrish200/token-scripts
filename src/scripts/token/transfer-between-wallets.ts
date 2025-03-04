@@ -1,261 +1,323 @@
-import { Command } from 'commander';
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-import {
-  TOKEN_2022_PROGRAM_ID,
-  getMint,
-  getAccount,
+#!/usr/bin/env ts-node
+import { Connection, Keypair, PublicKey, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
+import { 
+  TOKEN_2022_PROGRAM_ID, 
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
+  getAccount,
+  getMint,
+  ExtensionType,
+  getTransferFeeConfig,
   createTransferCheckedInstruction,
+  unpackAccount
 } from '@solana/spl-token';
-import { loadKeypair, loadAllWallets } from '../../utils/wallet';
-import { getEnvironment, logEnvironmentInfo, config } from '../../config';
 import * as fs from 'fs';
 import * as path from 'path';
+import { program } from 'commander';
+import chalk from 'chalk';
+import ora from 'ora';
 
-// Define the program
-const program = new Command();
-
-// Configure the program
 program
-  .name('transfer-between-wallets')
-  .description('Transfer tokens between wallets to generate fees')
-  .option('-e, --env <environment>', 'Environment to use (local, testnet, mainnet)', 'testnet')
-  .option('-w, --wallet <path>', 'Path to wallet keypair file')
-  .option('-m, --mint <address>', 'Token mint address')
-  .option('-n, --name <name>', 'Token name')
-  .option('-a, --amount <amount>', 'Amount of tokens to transfer', '1')
-  .option('-c, --count <count>', 'Number of transfers to make', '5')
+  .option('--env <string>', 'Solana cluster environment', 'testnet')
+  .option('--wallet <string>', 'Wallet name', 'wallet-1741011852572')
+  .option('--mint <string>', 'Token mint address')
+  .option('--amount <number>', 'Amount to transfer', '100')
+  .option('--count <number>', 'Number of wallets to transfer to', '3')
   .parse(process.argv);
 
-// Get the options
 const options = program.opts();
 
-/**
- * Main function to transfer tokens between wallets
- */
+// Get the RPC URL based on the environment
+function getRpcUrl(env: string): string {
+  switch (env) {
+    case 'mainnet-beta':
+      return 'https://api.mainnet-beta.solana.com';
+    case 'testnet':
+      return 'https://api.testnet.solana.com';
+    case 'devnet':
+      return 'https://api.devnet.solana.com';
+    case 'local':
+      return 'http://localhost:8899';
+    default:
+      return 'https://api.testnet.solana.com';
+  }
+}
+
+// Load a keypair from a file
+function loadKeypair(filePath: string): Keypair {
+  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const keypairData = JSON.parse(fileContent);
+  
+  if (Array.isArray(keypairData)) {
+    // Handle array format
+    return Keypair.fromSecretKey(new Uint8Array(keypairData));
+  } else if (keypairData.secretKey) {
+    // Handle object format with base64 encoded secretKey
+    const secretKeyString = keypairData.secretKey;
+    const secretKey = Buffer.from(secretKeyString, 'base64');
+    return Keypair.fromSecretKey(new Uint8Array(secretKey));
+  } else {
+    throw new Error(`Invalid keypair format in file: ${filePath}`);
+  }
+}
+
+// Function to get all wallet keypairs in a directory
+function getAllWallets(walletDir: string): Keypair[] {
+  if (!fs.existsSync(walletDir)) {
+    throw new Error(`Wallet directory not found: ${walletDir}`);
+  }
+  
+  // Get all files in the directory
+  const files = fs.readdirSync(walletDir);
+  
+  // Filter for JSON files
+  const jsonFiles = files.filter(file => file.endsWith('.json'));
+  
+  // Load each keypair
+  return jsonFiles.map(file => loadKeypair(path.join(walletDir, file)));
+}
+
 async function main() {
+  console.log(chalk.green('Transferring tokens between wallets...'));
+  
+  // Get the RPC URL
+  const rpcUrl = getRpcUrl(options.env);
+  console.log(chalk.blue(`RPC URL: ${rpcUrl}`));
+  
+  // Create a connection to the cluster
+  const connection = new Connection(rpcUrl, 'confirmed');
+  
+  // Load the wallet
+  const walletsDir = path.join(process.cwd(), 'wallets', options.env);
+  const walletFile = path.join(walletsDir, `${options.wallet}.json`);
+  const wallet = loadKeypair(walletFile);
+  console.log(chalk.blue(`Main Wallet: ${wallet.publicKey.toString()}`));
+  
+  // Check the wallet balance
+  const walletBalance = await connection.getBalance(wallet.publicKey);
+  console.log(chalk.blue(`Wallet balance: ${walletBalance / 10**9} SOL`));
+  
+  // Get mint address
+  if (!options.mint) {
+    console.error(chalk.red('Mint address is required. Use --mint=<address>'));
+    process.exit(1);
+  }
+  
+  const mintAddress = new PublicKey(options.mint);
+  console.log(chalk.blue(`Mint address: ${mintAddress.toString()}`));
+  
+  // Get all wallets
+  const allWallets = getAllWallets(walletsDir);
+  console.log(chalk.blue(`Found ${allWallets.length} wallets`));
+  
+  // Get the mint info
+  const mint = await getMint(connection, mintAddress, 'confirmed', TOKEN_2022_PROGRAM_ID);
+  const decimals = mint.decimals;
+  console.log(chalk.blue(`Token decimals: ${decimals}`));
+  
+  // Calculate the amount in raw units
+  const amount = BigInt(parseInt(options.amount) * 10**decimals);
+  console.log(chalk.blue(`Transfer amount: ${options.amount} tokens (${amount} raw)`));
+  
+  // Check if the mint has the transfer fee extension
+  let transferFeeConfig;
+  let feeBasisPoints = 1000; // Default to 10%
+  let maxFee = BigInt(0);
+  
   try {
-    // Get environment and configuration
-    const env = getEnvironment();
-    logEnvironmentInfo();
+    // Try to get the transfer fee config directly from the mint info
+    transferFeeConfig = getTransferFeeConfig(mint);
     
-    // Get wallet
-    const walletArg = options.wallet || process.argv.find(arg => arg.startsWith('--wallet='))?.split('=')[1];
-    if (!walletArg) {
-      console.error('Please provide a wallet with --wallet=<wallet-name>');
-      process.exit(1);
+    if (transferFeeConfig) {
+      feeBasisPoints = transferFeeConfig.newerTransferFee.transferFeeBasisPoints;
+      maxFee = transferFeeConfig.newerTransferFee.maximumFee;
+      console.log(chalk.blue(`Transfer fee: ${feeBasisPoints / 100}%`));
+      if (maxFee > BigInt(0)) {
+        console.log(chalk.blue(`Maximum fee: ${maxFee}`));
+      } else {
+        console.log(chalk.blue(`Maximum fee: None (unlimited)`));
+      }
+    } else {
+      console.log(chalk.yellow('Token does not have the transfer fee extension'));
     }
-    
-    // Get mint address
-    const mintAddressArg = options.mint || process.argv.find(arg => arg.startsWith('--mint='))?.split('=')[1];
-    if (!mintAddressArg) {
-      console.error('Please provide a token mint address with --mint=<address>');
-      process.exit(1);
-    }
-    
-    // Get token name
-    const tokenNameArg = options.name || process.argv.find(arg => arg.startsWith('--name='))?.split('=')[1];
-    
-    // Get amount
-    const amountArg = options.amount || process.argv.find(arg => arg.startsWith('--amount='))?.split('=')[1] || '1';
-    const amount = parseFloat(amountArg);
-    
-    // Get count
-    const countArg = options.count || process.argv.find(arg => arg.startsWith('--count='))?.split('=')[1] || '5';
-    const count = parseInt(countArg);
-    
-    // Load keypair
-    const keypair = loadKeypair(walletArg);
-    const publicKey = keypair.publicKey;
-    
-    console.log(`Wallet: ${publicKey.toBase58()}`);
-    
-    // Create connection
-    const connection = new Connection(config.rpcUrl, 'confirmed');
-    
-    // Get mint address
-    const mintAddress = new PublicKey(mintAddressArg);
-    console.log(`Mint address: ${mintAddress.toBase58()}`);
-    
-    // Get mint info
-    const mintInfo = await getMint(
+  } catch (error) {
+    console.error(chalk.red('Error getting transfer fee config:'), error);
+  }
+  
+  // Calculate the fee
+  const calculatedFee = (amount * BigInt(feeBasisPoints)) / BigInt(10000);
+  const fee = maxFee > BigInt(0) && calculatedFee > maxFee ? maxFee : calculatedFee;
+  console.log(chalk.blue(`Calculated fee per transfer: ${fee} (${Number(fee) / 10**decimals} tokens)`));
+  
+  // Get source token account
+  const sourceTokenAccount = getAssociatedTokenAddressSync(
+    mintAddress,
+    wallet.publicKey,
+    false,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  
+  // Get the token account info
+  try {
+    const tokenAccountInfo = await getAccount(
       connection,
-      mintAddress,
+      sourceTokenAccount,
       'confirmed',
       TOKEN_2022_PROGRAM_ID
     );
     
-    console.log(`\nMint Info:`);
-    console.log(`- Supply: ${Number(mintInfo.supply) / (10 ** mintInfo.decimals)}`);
-    console.log(`- Decimals: ${mintInfo.decimals}`);
+    console.log(chalk.blue(`Token account balance: ${tokenAccountInfo.amount} (${Number(tokenAccountInfo.amount) / 10**decimals} tokens)`));
     
-    // Load token info if available
-    let transferFeeBasisPoints = 0;
-    let maxFee = BigInt(0);
-    
-    if (tokenNameArg) {
-      const tokenInfoDir = path.resolve(process.cwd(), 'token-info');
-      const tokenInfoPath = path.join(tokenInfoDir, `${tokenNameArg.toLowerCase()}.json`);
-      
-      if (fs.existsSync(tokenInfoPath)) {
-        const tokenInfo = JSON.parse(fs.readFileSync(tokenInfoPath, 'utf-8'));
-        
-        console.log(`\nToken Info from file:`);
-        console.log(`- Name: ${tokenInfo.name}`);
-        console.log(`- Symbol: ${tokenInfo.symbol}`);
-        console.log(`- Decimals: ${tokenInfo.decimals}`);
-        console.log(`- Extensions: ${tokenInfo.extensions.join(', ')}`);
-        
-        if (tokenInfo.transferFee) {
-          transferFeeBasisPoints = tokenInfo.transferFee.feeBasisPoints;
-          maxFee = BigInt(tokenInfo.transferFee.maxFee);
-          console.log(`- Transfer Fee: ${transferFeeBasisPoints / 100}%`);
-          console.log(`- Max Fee: ${maxFee === BigInt(0) ? 'Unlimited' : maxFee.toString()}`);
-        }
-      }
-    }
-    
-    // Load all wallets
-    console.log('\nLoading all wallets...');
-    const wallets = loadAllWallets();
-    console.log(`Loaded ${wallets.length} wallets.`);
-    
-    // Filter out wallets that have tokens
-    console.log('\nChecking wallets for tokens...');
-    const walletsWithTokens = [];
-    
-    for (let i = 0; i < wallets.length; i++) {
-      const wallet = wallets[i];
-      
-      try {
-        // Get the associated token account for the wallet
-        const tokenAccount = getAssociatedTokenAddressSync(
-          mintAddress,
-          wallet.publicKey,
-          false,
-          TOKEN_2022_PROGRAM_ID
-        );
-        
-        try {
-          // Get the token account info
-          const tokenAccountInfo = await getAccount(
-            connection,
-            tokenAccount,
-            'confirmed',
-            TOKEN_2022_PROGRAM_ID
-          );
-          
-          if (tokenAccountInfo.amount > BigInt(0)) {
-            walletsWithTokens.push({
-              wallet,
-              tokenAccount,
-              balance: tokenAccountInfo.amount,
-            });
-            
-            console.log(`Wallet ${i + 1}: ${wallet.publicKey.toBase58()}`);
-            console.log(`- Token Account: ${tokenAccount.toBase58()}`);
-            console.log(`- Balance: ${Number(tokenAccountInfo.amount) / (10 ** mintInfo.decimals)}`);
-          }
-        } catch (error) {
-          // Token account might not exist, skip
-        }
-      } catch (error) {
-        console.error(`Error checking wallet ${i + 1}:`, error);
-      }
-    }
-    
-    console.log(`\nFound ${walletsWithTokens.length} wallets with tokens.`);
-    
-    if (walletsWithTokens.length < 2) {
-      console.error('Need at least 2 wallets with tokens to transfer between them.');
+    // Check if balance is enough for transfers
+    const totalAmount = amount * BigInt(parseInt(options.count));
+    if (tokenAccountInfo.amount < totalAmount) {
+      console.error(chalk.red(`Insufficient balance. Required: ${totalAmount} (${Number(totalAmount) / 10**decimals} tokens), Available: ${tokenAccountInfo.amount} (${Number(tokenAccountInfo.amount) / 10**decimals} tokens)`));
       process.exit(1);
     }
-    
-    // Calculate the amount in lamports
-    const amountLamports = BigInt(Math.floor(amount * (10 ** mintInfo.decimals)));
-    
-    console.log(`\nTransferring ${amount} tokens ${count} times between wallets...`);
-    
-    // Make transfers
-    for (let i = 0; i < count; i++) {
-      // Select random source and destination wallets
-      const sourceIndex = Math.floor(Math.random() * walletsWithTokens.length);
-      let destIndex = Math.floor(Math.random() * walletsWithTokens.length);
+  } catch (error) {
+    console.error(chalk.red('Error getting token account:'), error);
+    process.exit(1);
+  }
+  
+  // Get wallets to transfer to
+  const transferCount = parseInt(options.count);
+  const walletIndex = allWallets.findIndex(w => w.publicKey.toString() === wallet.publicKey.toString());
+  if (walletIndex === -1) {
+    console.error(chalk.red('Main wallet not found in wallet directory'));
+    process.exit(1);
+  }
+  
+  const wallets = allWallets.filter((_, index) => index !== walletIndex).slice(0, transferCount);
+  
+  if (wallets.length === 0) {
+    console.error(chalk.red('No wallets found to transfer to'));
+    process.exit(1);
+  }
+  
+  if (wallets.length < transferCount) {
+    console.warn(chalk.yellow(`Warning: Only ${wallets.length} wallets available, but ${transferCount} requested`));
+  }
+  
+  console.log(chalk.blue(`Transferring tokens to ${wallets.length} wallets`));
+  
+  // Create a spinner
+  const spinner = ora('Setting up transfers...').start();
+  
+  // Transfer to each wallet
+  let successCount = 0;
+  let failureCount = 0;
+  
+  for (const targetWallet of wallets) {
+    try {
+      spinner.text = `Transferring to wallet ${targetWallet.publicKey.toString()}...`;
       
-      // Make sure source and destination are different
-      while (destIndex === sourceIndex) {
-        destIndex = Math.floor(Math.random() * walletsWithTokens.length);
-      }
+      // Get the associated token account for the target wallet
+      const targetTokenAccount = getAssociatedTokenAddressSync(
+        mintAddress,
+        targetWallet.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
       
-      const source = walletsWithTokens[sourceIndex];
-      const destination = walletsWithTokens[destIndex];
-      
-      // Check if source has enough balance
-      if (source.balance < amountLamports) {
-        console.log(`Skipping transfer ${i + 1}: Source wallet doesn't have enough balance.`);
-        continue;
-      }
-      
-      console.log(`\nTransfer ${i + 1}:`);
-      console.log(`- From: ${source.wallet.publicKey.toBase58()}`);
-      console.log(`- To: ${destination.wallet.publicKey.toBase58()}`);
-      console.log(`- Amount: ${amount} tokens`);
-      
+      // Check if the token account exists
+      let targetAccountExists = false;
       try {
-        // Create transfer instruction
-        const transferInstruction = createTransferCheckedInstruction(
-          source.tokenAccount,
+        await getAccount(connection, targetTokenAccount, 'confirmed', TOKEN_2022_PROGRAM_ID);
+        targetAccountExists = true;
+      } catch (error) {
+        // Account doesn't exist, need to create it
+      }
+      
+      // Create a new transaction
+      const instructions = [];
+      
+      // Create token account if it doesn't exist
+      if (!targetAccountExists) {
+        instructions.push(
+          createAssociatedTokenAccountInstruction(
+            wallet.publicKey,
+            targetTokenAccount,
+            targetWallet.publicKey,
+            mintAddress,
+            TOKEN_2022_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          )
+        );
+      }
+      
+      // Add transfer instruction - use regular transferChecked instead of transferCheckedWithFee
+      instructions.push(
+        createTransferCheckedInstruction(
+          sourceTokenAccount,
           mintAddress,
-          destination.tokenAccount,
-          source.wallet.publicKey,
-          amountLamports,
-          mintInfo.decimals,
+          targetTokenAccount,
+          wallet.publicKey,
+          amount,
+          decimals,
           [],
           TOKEN_2022_PROGRAM_ID
-        );
-        
-        // Create and sign transaction
-        const transaction = new Transaction().add(transferInstruction);
-        
-        // Send and confirm transaction
-        const signature = await sendAndConfirmTransaction(
-          connection,
-          transaction,
-          [source.wallet],
-          { commitment: 'confirmed' }
-        );
-        
-        console.log(`- Transaction: ${signature}`);
-        console.log(`- Status: Success`);
-        
-        // Update balances
-        source.balance -= amountLamports;
-        destination.balance += amountLamports;
-        
-        // Calculate fee
-        if (transferFeeBasisPoints > 0) {
-          const fee = (amountLamports * BigInt(transferFeeBasisPoints)) / BigInt(10000);
-          console.log(`- Fee: ${Number(fee) / (10 ** mintInfo.decimals)} tokens`);
-        }
-      } catch (error: any) {
-        console.error(`- Error: ${error.message}`);
-      }
+        )
+      );
+      
+      // Create a versioned transaction
+      const latestBlockhash = await connection.getLatestBlockhash();
+      const messageV0 = new TransactionMessage({
+        payerKey: wallet.publicKey,
+        recentBlockhash: latestBlockhash.blockhash,
+        instructions,
+      }).compileToV0Message();
+      
+      const transaction = new VersionedTransaction(messageV0);
+      
+      // Sign the transaction
+      transaction.sign([wallet]);
+      
+      // Send the transaction
+      const signature = await connection.sendTransaction(transaction);
+      
+      // Wait for confirmation
+      await connection.confirmTransaction({
+        signature,
+        ...latestBlockhash,
+      });
+      
+      console.log(chalk.green(`\nTransfer successful to ${targetWallet.publicKey.toString()}`));
+      console.log(chalk.blue(`Transaction signature: ${signature}`));
+      
+      successCount++;
+    } catch (error) {
+      console.error(chalk.red(`\nError transferring to ${targetWallet.publicKey.toString()}:`), error);
+      failureCount++;
     }
+  }
+  
+  spinner.succeed('Transfers completed');
+  
+  console.log(chalk.green(`\nTransfer Summary:`));
+  console.log(chalk.blue(`Successful transfers: ${successCount}`));
+  if (failureCount > 0) {
+    console.log(chalk.red(`Failed transfers: ${failureCount}`));
+  }
+  
+  // Check source account balance after transfers
+  try {
+    const tokenAccountInfo = await getAccount(
+      connection,
+      sourceTokenAccount,
+      'confirmed',
+      TOKEN_2022_PROGRAM_ID
+    );
     
-    console.log('\nTransfers completed.');
-    console.log(`\nTo check for withheld fees, run:`);
-    console.log(`npm run check-all-token-accounts:${env} -- --wallet=${walletArg} --mint=${mintAddressArg}${tokenNameArg ? ` --name=${tokenNameArg}` : ''}`);
-    
+    console.log(chalk.blue(`\nRemaining token balance: ${tokenAccountInfo.amount} (${Number(tokenAccountInfo.amount) / 10**decimals} tokens)`));
   } catch (error) {
-    console.error('Error transferring tokens:', error);
-    process.exit(1);
+    console.error(chalk.red('Error getting final token account balance:'), error);
   }
 }
 
-// Run the script
-main(); 
+main().catch(err => {
+  console.error(chalk.red('Error:'), err);
+  process.exit(1);
+}); 

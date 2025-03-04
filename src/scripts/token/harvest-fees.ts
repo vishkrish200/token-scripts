@@ -21,7 +21,7 @@ import {
   AccountState,
   Account,
 } from '@solana/spl-token';
-import { loadKeypair, getBalance } from '../../utils/wallet';
+import { loadWallet, loadWalletFromPrivateKey, getBalance } from '../../utils/wallet';
 import { getConnection } from '../../config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,6 +38,7 @@ program
   .description('Harvest and withdraw fees from token accounts')
   .option('-e, --env <environment>', 'Environment to use (local, testnet, mainnet)', 'testnet')
   .option('-w, --wallet <path>', 'Path to wallet keypair file', 'wallet.json')
+  .option('-p, --private-key <string>', 'Private key as a JSON array of numbers')
   .option('-m, --mint <address>', 'Token mint address')
   .option('-n, --name <n>', 'Token name (used for saving info)')
   .option('-b, --batch-size <size>', 'Number of accounts to process in a batch', '10')
@@ -341,6 +342,11 @@ async function main() {
       process.exit(1);
     }
     
+    if (!options.wallet && !options.privateKey) {
+      console.error(chalk.red('Error: Either wallet path (--wallet) or private key (--private-key) is required'));
+      process.exit(1);
+    }
+    
     // Set up connection with custom RPC if provided
     const connection = options.rpc
       ? new Connection(options.rpc, 'confirmed')
@@ -350,8 +356,22 @@ async function main() {
     console.log(chalk.blue(`RPC URL: ${connection.rpcEndpoint}`));
     
     // Load wallet
-    const wallet = loadKeypair(options.wallet);
-    console.log(chalk.blue(`Wallet: ${wallet.publicKey.toBase58()}`));
+    let wallet: Keypair;
+    try {
+      if (options.privateKey) {
+        // Load from provided private key
+        console.log(chalk.blue(`Loading wallet from provided private key`));
+        wallet = loadWalletFromPrivateKey(options.privateKey);
+      } else {
+        // Load from wallet file
+        console.log(chalk.blue(`Loading wallet: ${options.wallet}`));
+        wallet = loadWallet(options.wallet);
+      }
+      console.log(chalk.blue(`Wallet public key: ${wallet.publicKey.toString()}`));
+    } catch (error) {
+      console.error(chalk.red(`Error loading wallet: ${error}`));
+      process.exit(1);
+    }
     
     // Check wallet balance
     const balance = await getBalance(wallet.publicKey);

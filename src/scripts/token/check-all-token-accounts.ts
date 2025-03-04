@@ -8,6 +8,7 @@ import {
   getMint,
   getAccount,
   getAssociatedTokenAddressSync,
+  getTransferFeeAmount,
 } from '@solana/spl-token';
 import { loadKeypair, loadAllWallets } from '../../utils/wallet';
 import { getEnvironment, logEnvironmentInfo, config } from '../../config';
@@ -139,18 +140,32 @@ async function main() {
             TOKEN_2022_PROGRAM_ID
           );
           
-          // @ts-ignore - Access the transferFeeAmount property
-          if (tokenAccountInfo.transferFeeAmount && tokenAccountInfo.transferFeeAmount > BigInt(0)) {
-            accountsWithFees++;
-            // @ts-ignore - Access the transferFeeAmount property
-            totalWithheldFees += tokenAccountInfo.transferFeeAmount;
+          // Log detailed information about the token account
+          console.log(`\nWallet ${i + 1}: ${wallet.publicKey.toBase58()}`);
+          console.log(`- Token Account: ${tokenAccount.toBase58()}`);
+          console.log(`- Balance: ${Number(tokenAccountInfo.amount) / (10 ** mintInfo.decimals)}`);
+          
+          // Check for withheld fees using getTransferFeeAmount
+          const transferFeeAmount = getTransferFeeAmount(tokenAccountInfo);
+          
+          if (transferFeeAmount) {
+            console.log(`- Transfer Fee Amount: ${transferFeeAmount ? JSON.stringify(transferFeeAmount) : 'None'}`);
             
-            console.log(`\nWallet ${i + 1}: ${wallet.publicKey.toBase58()}`);
-            console.log(`- Token Account: ${tokenAccount.toBase58()}`);
-            console.log(`- Balance: ${Number(tokenAccountInfo.amount) / (10 ** mintInfo.decimals)}`);
-            // @ts-ignore - Access the transferFeeAmount property
-            console.log(`- Withheld Fees: ${Number(tokenAccountInfo.transferFeeAmount) / (10 ** mintInfo.decimals)}`);
+            if (transferFeeAmount.withheldAmount > BigInt(0)) {
+              accountsWithFees++;
+              totalWithheldFees += transferFeeAmount.withheldAmount;
+              console.log(`- Withheld Fees: ${Number(transferFeeAmount.withheldAmount) / (10 ** mintInfo.decimals)}`);
+            } else {
+              console.log(`- No withheld fees in this account`);
+            }
+          } else {
+            console.log(`- No transfer fee extension found in this account`);
           }
+          
+          // Log raw account data for debugging
+          console.log(`- Raw Account Data: ${JSON.stringify(tokenAccountInfo, (key, value) => 
+            typeof value === 'bigint' ? value.toString() : value, 2)}`);
+          
         } catch (error) {
           // Token account might not exist, skip
         }
