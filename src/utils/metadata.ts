@@ -1,7 +1,15 @@
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
-import { createMetadataAccountV3 } from '@metaplex-foundation/mpl-token-metadata';
-import { signerIdentity, generateSigner, createSignerFromKeypair } from '@metaplex-foundation/umi';
+import { 
+  createV1,
+  TokenStandard,
+  findMetadataPda,
+} from '@metaplex-foundation/mpl-token-metadata';
+import { 
+  signerIdentity, 
+  createSignerFromKeypair,
+  percentAmount,
+} from '@metaplex-foundation/umi';
 import { fromWeb3JsKeypair, fromWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -26,39 +34,34 @@ export async function createTokenMetadata(
   uri: string,
   creators?: { address: PublicKey; share: number; verified: boolean }[]
 ): Promise<string> {
-  // Create Umi instance
-  const umi = createUmi(connection.rpcEndpoint);
-  
-  // Convert Web3.js types to Umi types
-  const umiSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
-  const umiMint = fromWeb3JsPublicKey(mint);
-  
-  // Set the signer
-  umi.use(signerIdentity(umiSigner));
-  
-  // Create metadata
-  const builder = createMetadataAccountV3(umi, {
-    mint: umiMint,
-    mintAuthority: umiSigner,
-    updateAuthority: umiSigner.publicKey,
-    data: {
+  try {
+    // Create Umi instance
+    const umi = createUmi(connection.rpcEndpoint);
+    const signer = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
+    umi.use(signerIdentity(signer));
+    
+    // Convert Web3.js types to Umi types
+    const umiMint = fromWeb3JsPublicKey(mint);
+    
+    // Create metadata
+    const builder = createV1(umi, {
+      mint: umiMint,
+      authority: signer,
       name,
       symbol,
       uri,
-      sellerFeeBasisPoints: 0,
+      sellerFeeBasisPoints: percentAmount(0),
       creators: creators ? creators.map(c => ({
         address: fromWeb3JsPublicKey(c.address),
         verified: c.verified,
         share: c.share,
       })) : null,
+      tokenStandard: TokenStandard.Fungible,
       collection: null,
       uses: null,
-    },
-    isMutable: true,
-    collectionDetails: null,
-  });
+      isMutable: true,
+    });
 
-  try {
     const result = await builder.sendAndConfirm(umi);
     return result.signature.toString();
   } catch (error) {
