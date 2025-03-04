@@ -12,12 +12,15 @@ export interface TokenConfig {
   feeBasisPoints: number;
   maxFee: number;
   metadata?: {
+    name: string;
+    symbol: string;
     description: string;
-    uri?: string;
+    uri: string;
     image?: string;
     external_url?: string;
     attributes?: { trait_type: string; value: string }[];
     properties?: Record<string, any>;
+    creators?: { address: string; share: number; verified: boolean }[];
   };
 }
 

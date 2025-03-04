@@ -9,7 +9,9 @@ import {
   getMintLen,
   createMintToInstruction,
   getAssociatedTokenAddressSync,
-  createAssociatedTokenAccountInstruction
+  createAssociatedTokenAccountInstruction,
+  createSetAuthorityInstruction,
+  AuthorityType
 } from '@solana/spl-token';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -185,60 +187,9 @@ async function main() {
   // Calculate rent required
   const lamports = await connection.getMinimumBalanceForRentExemption(mintLen);
   
-  // Create a transaction to create the mint account
-  const transaction = new Transaction().add(
-    SystemProgram.createAccount({
-      fromPubkey: wallet.publicKey,
-      newAccountPubkey: mintKeypair.publicKey,
-      space: mintLen,
-      lamports,
-      programId: TOKEN_2022_PROGRAM_ID,
-    })
-  );
-  
-  // Add transfer fee config instruction with harvestable fees
+  // Add the transfer fee config authority
   const transferFeeConfigAuthority = wallet.publicKey;
   const withdrawWithheldAuthority = wallet.publicKey;
-  
-  // IMPORTANT: This configuration sets up harvestable fees
-  // The fees will be withheld in the recipient token account and can be harvested
-  // using the harvestWithheldTokensToMint instruction
-  transaction.add(
-    createInitializeTransferFeeConfigInstruction(
-      mintKeypair.publicKey,
-      transferFeeConfigAuthority,
-      withdrawWithheldAuthority,
-      feeBasisPoints,
-      maxFee,
-      TOKEN_2022_PROGRAM_ID
-    )
-  );
-  
-  // Add the initialize mint instruction
-  transaction.add(
-    createInitializeMintInstruction(
-      mintKeypair.publicKey,
-      tokenDecimals,
-      wallet.publicKey,
-      wallet.publicKey,
-      TOKEN_2022_PROGRAM_ID
-    )
-  );
-  
-  // Send the transaction to create the mint
-  const mintSignature = await sendAndConfirmTransaction(
-    connection,
-    transaction,
-    [wallet, mintKeypair],
-    { commitment: 'confirmed' }
-  );
-  
-  spinner.succeed(`Token mint created: ${mintKeypair.publicKey.toBase58()}`);
-  console.log(chalk.green(`Transaction signature: ${mintSignature}`));
-  
-  // Create a token account for the creator
-  spinner.text = 'Creating token account...';
-  spinner.start();
   
   // Get the associated token account address
   const tokenAccount = getAssociatedTokenAddressSync(
@@ -248,9 +199,38 @@ async function main() {
     TOKEN_2022_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID
   );
-  
-  // Create a transaction to create the token account
-  const createAccountTransaction = new Transaction().add(
+
+  // Create a transaction to create the mint account and initialize it
+  const transaction = new Transaction().add(
+    // Create the mint account
+    SystemProgram.createAccount({
+      fromPubkey: wallet.publicKey,
+      newAccountPubkey: mintKeypair.publicKey,
+      space: mintLen,
+      lamports,
+      programId: TOKEN_2022_PROGRAM_ID,
+    }),
+    
+    // Initialize transfer fee config
+    createInitializeTransferFeeConfigInstruction(
+      mintKeypair.publicKey,
+      transferFeeConfigAuthority,
+      withdrawWithheldAuthority,
+      feeBasisPoints,
+      maxFee,
+      TOKEN_2022_PROGRAM_ID
+    ),
+    
+    // Initialize mint with wallet as temporary authority
+    createInitializeMintInstruction(
+      mintKeypair.publicKey,
+      tokenDecimals,
+      wallet.publicKey, // temporary mint authority for initial supply
+      null, // no freeze authority
+      TOKEN_2022_PROGRAM_ID
+    ),
+
+    // Create token account
     createAssociatedTokenAccountInstruction(
       wallet.publicKey,
       tokenAccount,
@@ -258,25 +238,9 @@ async function main() {
       mintKeypair.publicKey,
       TOKEN_2022_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID
-    )
-  );
-  
-  // Send the transaction to create the token account
-  const createAccountSignature = await sendAndConfirmTransaction(
-    connection,
-    createAccountTransaction,
-    [wallet],
-    { commitment: 'confirmed' }
-  );
-  
-  spinner.succeed(`Token account created: ${tokenAccount.toBase58()}`);
-  
-  // Mint the initial supply to the creator's token account
-  spinner.text = `Minting ${initialSupply} tokens...`;
-  spinner.start();
-  
-  // Create a transaction to mint tokens
-  const mintTransaction = new Transaction().add(
+    ),
+
+    // Mint the entire supply
     createMintToInstruction(
       mintKeypair.publicKey,
       tokenAccount,
@@ -284,20 +248,66 @@ async function main() {
       BigInt(initialSupply * 10**tokenDecimals),
       [],
       TOKEN_2022_PROGRAM_ID
+    ),
+
+    // Remove mint authority to fix supply
+    createSetAuthorityInstruction(
+      mintKeypair.publicKey,
+      wallet.publicKey,
+      AuthorityType.MintTokens,
+      null,
+      [],
+      TOKEN_2022_PROGRAM_ID
     )
   );
-  
-  // Send the transaction to mint tokens
-  const mintToSignature = await sendAndConfirmTransaction(
+
+  // Send the transaction to create and initialize everything
+  const signature = await sendAndConfirmTransaction(
     connection,
-    mintTransaction,
-    [wallet],
+    transaction,
+    [wallet, mintKeypair],
     { commitment: 'confirmed' }
   );
-  
-  spinner.succeed(`Minted ${initialSupply} tokens to ${tokenAccount.toBase58()}`);
-  console.log(chalk.green(`Transaction signature: ${mintToSignature}`));
-  
+
+  spinner.succeed(`Token created with fixed supply: ${mintKeypair.publicKey.toBase58()}`);
+  console.log(chalk.green(`Transaction signature: ${signature}`));
+  console.log(chalk.blue(`Mint Authority: None (fixed supply)`));
+  console.log(chalk.blue(`Freeze Authority: None`));
+  console.log(chalk.blue(`Initial Supply: ${initialSupply} tokens`));
+  console.log(chalk.blue(`Token Account: ${tokenAccount.toBase58()}`));
+
+  // Create metadata if specified
+  let metadataAddress: string | undefined;
+  if (metadata) {
+    spinner.text = 'Creating token metadata...';
+    spinner.start();
+
+    try {
+      // Convert creator addresses from strings to PublicKey objects
+      const creators = metadata.creators?.map(creator => ({
+        ...creator,
+        address: new PublicKey(creator.address)
+      }));
+
+      const metadataSignature = await createTokenMetadata(
+        connection,
+        wallet,
+        mintKeypair.publicKey,
+        metadata.name,
+        metadata.symbol,
+        metadata.uri,
+        creators
+      );
+
+      spinner.succeed('Token metadata created');
+      console.log(chalk.green(`Metadata transaction signature: ${metadataSignature}`));
+      metadataAddress = metadataSignature;
+    } catch (error) {
+      spinner.fail('Failed to create token metadata');
+      console.error(chalk.red(`Error creating metadata: ${error}`));
+    }
+  }
+
   // Save token information
   const tokenInfo: TokenInfo = {
     name: tokenName,
@@ -307,89 +317,15 @@ async function main() {
     tokenAccount: tokenAccount.toBase58(),
     initialSupply,
     feeBasisPoints,
-    maxFee: Number(maxFee) / 10**tokenDecimals,
+    maxFee: Number(maxFee),
     createdAt: new Date().toISOString(),
     environment: options.env,
-    metadata: tokenConfig.metadata
+    metadata: metadata,
+    metadataAddress
   };
-  
+
   saveTokenInfo(tokenName, tokenInfo);
-  
-  // Create and upload metadata if provided
-  if (metadata) {
-    spinner.text = 'Creating token metadata...';
-    spinner.start();
-    
-    try {
-      // Generate metadata JSON file
-      const metadataDir = path.resolve(process.cwd(), 'metadata');
-      if (!fs.existsSync(metadataDir)) {
-        fs.mkdirSync(metadataDir, { recursive: true });
-      }
-      
-      const metadataFilePath = path.join(
-        metadataDir, 
-        `${tokenName.toLowerCase().replace(/\s+/g, '-')}-${options.env}.json`
-      );
-      
-      // Create metadata JSON with all available fields
-      const metadataJson = generateMetadataJson({
-        name: tokenName,
-        symbol: tokenSymbol,
-        description: metadata.description || `${tokenName} token`,
-        image: metadata.image || '',
-        external_url: metadata.external_url || '',
-        attributes: metadata.attributes || [],
-        properties: metadata.properties || {}
-      }, metadataFilePath);
-      
-      console.log(chalk.blue(`Metadata JSON saved to: ${metadataFilePath}`));
-      
-      // If URI is provided in metadata, use it, otherwise we can't create on-chain metadata
-      if (metadata.uri) {
-        // Create on-chain metadata
-        const metadataSignature = await createTokenMetadata(
-          connection,
-          wallet,
-          mintKeypair.publicKey,
-          tokenName,
-          tokenSymbol,
-          metadata.uri
-        );
-        
-        spinner.succeed(`Token metadata created on-chain`);
-        console.log(chalk.green(`Metadata transaction signature: ${metadataSignature}`));
-        
-        // Update token info with metadata
-        tokenInfo.metadataAddress = PublicKey.findProgramAddressSync(
-          [
-            Buffer.from('metadata'),
-            new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s').toBuffer(),
-            mintKeypair.publicKey.toBuffer(),
-          ],
-          new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
-        )[0].toBase58();
-        
-        // Save updated token info
-        saveTokenInfo(tokenName, tokenInfo);
-      } else {
-        spinner.warn(`No metadata URI provided. On-chain metadata not created.`);
-        console.log(chalk.yellow(`To create on-chain metadata, add a 'uri' field to your metadata configuration.`));
-        console.log(chalk.yellow(`The URI should point to a hosted JSON file with your token metadata.`));
-      }
-    } catch (error) {
-      spinner.fail(`Failed to create token metadata`);
-      console.error(chalk.red(`Error creating metadata: ${error}`));
-    }
-  } else {
-    console.log(chalk.yellow('No metadata configuration provided.'));
-    console.log(chalk.yellow('To add metadata, include a "metadata" object in your token configuration.'));
-  }
-  
-  console.log(chalk.green(`\nToken created successfully!`));
-  console.log(chalk.blue(`Mint Address: ${mintKeypair.publicKey.toBase58()}`));
-  console.log(chalk.blue(`Token Account: ${tokenAccount.toBase58()}`));
-  console.log(chalk.blue(`Initial Supply: ${initialSupply} tokens`));
+  spinner.succeed('Token creation completed successfully!');
   
   console.log(chalk.green('\nToken Creation Summary:'));
   console.log(chalk.blue(`Token Name: ${tokenName}`));
@@ -401,6 +337,7 @@ async function main() {
   console.log(chalk.blue(`Max Fee: ${maxFee > BigInt(0) ? Number(maxFee) / 10**tokenDecimals : 'None (unlimited)'}`));
   console.log(chalk.blue(`Token Account: ${tokenAccount.toBase58()}`));
   console.log(chalk.blue(`Harvestable Fees: Enabled`));
+  console.log(chalk.blue(`Mint Authority: None (fixed supply)`));
   
   if (tokenConfig.metadata) {
     console.log(chalk.blue(`Metadata: ${tokenConfig.metadata.description}`));
@@ -424,7 +361,7 @@ async function main() {
   console.log(chalk.blue(`npm run harvest-fees:${options.env} -- --wallet=${options.wallet || ''} --mint=${mintKeypair.publicKey.toBase58()}`));
 }
 
-main().catch(err => {
-  console.error(chalk.red('Error:'), err);
+main().catch((error) => {
+  console.error(chalk.red('Error:', error));
   process.exit(1);
-}); 
+});
