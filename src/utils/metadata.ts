@@ -18,7 +18,7 @@ import * as path from 'path';
  * Create metadata for a token
  * @param connection Solana connection
  * @param payer Keypair of the payer
- * @param mint Mint address of the token
+ * @param mintKeypair Keypair of the mint
  * @param name Token name
  * @param symbol Token symbol
  * @param uri URI to the token metadata (JSON file)
@@ -28,7 +28,7 @@ import * as path from 'path';
 export async function createTokenMetadata(
   connection: Connection,
   payer: Keypair,
-  mint: PublicKey,
+  mintKeypair: Keypair,
   name: string,
   symbol: string,
   uri: string,
@@ -37,16 +37,18 @@ export async function createTokenMetadata(
   try {
     // Create Umi instance
     const umi = createUmi(connection.rpcEndpoint);
-    const signer = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
-    umi.use(signerIdentity(signer));
     
-    // Convert Web3.js types to Umi types
-    const umiMint = fromWeb3JsPublicKey(mint);
+    // Create signers
+    const payerSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
+    const mintSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(mintKeypair));
+    
+    // Set the payer as the primary signer
+    umi.use(signerIdentity(payerSigner));
     
     // Create metadata
     const builder = createV1(umi, {
-      mint: umiMint,
-      authority: signer,
+      mint: fromWeb3JsPublicKey(mintKeypair.publicKey),
+      authority: payerSigner,
       name,
       symbol,
       uri,
@@ -62,7 +64,9 @@ export async function createTokenMetadata(
       isMutable: true,
     });
 
+    // Send and confirm transaction
     const result = await builder.sendAndConfirm(umi);
+    
     return result.signature.toString();
   } catch (error) {
     console.error('Error creating metadata:', error);

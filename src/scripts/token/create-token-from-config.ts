@@ -276,12 +276,10 @@ async function main() {
   console.log(chalk.blue(`Initial Supply: ${initialSupply} tokens`));
   console.log(chalk.blue(`Token Account: ${tokenAccount.toBase58()}`));
 
-  // Create metadata if specified
+  // Create metadata if metadata config is provided
   let metadataAddress: string | undefined;
   if (metadata) {
-    spinner.text = 'Creating token metadata...';
-    spinner.start();
-
+    console.log('Creating metadata...');
     try {
       // Convert creator addresses from strings to PublicKey objects
       const creators = metadata.creators?.map(creator => ({
@@ -292,19 +290,17 @@ async function main() {
       const metadataSignature = await createTokenMetadata(
         connection,
         wallet,
-        mintKeypair.publicKey,
+        mintKeypair,
         metadata.name,
         metadata.symbol,
         metadata.uri,
         creators
       );
-
-      spinner.succeed('Token metadata created');
-      console.log(chalk.green(`Metadata transaction signature: ${metadataSignature}`));
+      console.log('Metadata created with signature:', metadataSignature);
       metadataAddress = metadataSignature;
     } catch (error) {
-      spinner.fail('Failed to create token metadata');
-      console.error(chalk.red(`Error creating metadata: ${error}`));
+      console.error('Error creating metadata:', error);
+      throw error;
     }
   }
 
