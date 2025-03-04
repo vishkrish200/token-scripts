@@ -7,14 +7,14 @@ import fs from 'fs';
 dotenv.config();
 
 // Environment types
-export type Environment = 'local' | 'testnet' | 'mainnet';
+export type Environment = 'local' | 'testnet' | 'mainnet' | 'mainnet-beta';
 
 // Get current environment from command line args or default to local
 export const getEnvironment = (): Environment => {
   const envArg = process.argv.find(arg => arg.startsWith('--env='));
   if (envArg) {
     const env = envArg.split('=')[1] as Environment;
-    if (['local', 'testnet', 'mainnet'].includes(env)) {
+    if (['local', 'testnet', 'mainnet', 'mainnet-beta'].includes(env)) {
       return env;
     }
   }
@@ -49,6 +49,12 @@ const environmentConfigs: Record<Environment, EnvironmentConfig> = {
     heliusApiKey: process.env.HELIUS_API_KEY_MAINNET,
     isDevnet: false,
   },
+  'mainnet-beta': {
+    rpcUrl: process.env.MAINNET_RPC_URL || clusterApiUrl('mainnet-beta'),
+    walletPath: process.env.WALLET_PATH_MAINNET || './wallets/mainnet',
+    heliusApiKey: process.env.HELIUS_API_KEY_MAINNET,
+    isDevnet: false,
+  }
 };
 
 // Get the configuration for the current environment

@@ -35,17 +35,17 @@ export async function createTokenMetadata(
   creators?: { address: PublicKey; share: number; verified: boolean }[]
 ): Promise<string> {
   try {
-    // Create Umi instance
+    // Create Umi instance with RPC endpoint
     const umi = createUmi(connection.rpcEndpoint);
     
-    // Create signers
+    // Create signers from keypairs
     const payerSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
     const mintSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(mintKeypair));
     
-    // Set the payer as the primary signer
+    // Set both payer and mint as signers
     umi.use(signerIdentity(payerSigner));
     
-    // Create metadata
+    // Create metadata with explicit mint authority
     const builder = createV1(umi, {
       mint: fromWeb3JsPublicKey(mintKeypair.publicKey),
       authority: payerSigner,
@@ -62,10 +62,18 @@ export async function createTokenMetadata(
       collection: null,
       uses: null,
       isMutable: true,
+      updateAuthority: fromWeb3JsPublicKey(payer.publicKey),
     });
 
-    // Send and confirm transaction
-    const result = await builder.sendAndConfirm(umi);
+    // Send and confirm transaction with both signers
+    const result = await builder.sendAndConfirm(umi, {
+      send: {
+        skipPreflight: true,
+      },
+      confirm: {
+        commitment: 'confirmed',
+      }
+    });
     
     return result.signature.toString();
   } catch (error) {

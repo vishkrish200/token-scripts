@@ -1,4 +1,4 @@
-import { generateKeypair, saveKeypair } from '../../utils/wallet';
+import { generateKeypair, saveWallet } from '../../utils/wallet';
 import { logEnvironmentInfo, getEnvironment } from '../../config';
 
 /**
@@ -16,7 +16,7 @@ async function main() {
     // Save the keypair to a file
     const env = getEnvironment();
     const filename = `wallet-${Date.now()}`;
-    const filePath = saveKeypair(keypair, filename);
+    const filePath = saveWallet(keypair, filename);
     
     console.log('\nWallet created successfully!');
     console.log(`Public Key: ${keypair.publicKey.toBase58()}`);

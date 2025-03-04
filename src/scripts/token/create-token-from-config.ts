@@ -221,11 +221,11 @@ async function main() {
       TOKEN_2022_PROGRAM_ID
     ),
     
-    // Initialize mint with wallet as temporary authority
+    // Initialize mint with wallet as mint authority
     createInitializeMintInstruction(
       mintKeypair.publicKey,
       tokenDecimals,
-      wallet.publicKey, // temporary mint authority for initial supply
+      wallet.publicKey, // Keep mint authority for metadata creation
       null, // no freeze authority
       TOKEN_2022_PROGRAM_ID
     ),
@@ -248,16 +248,6 @@ async function main() {
       BigInt(initialSupply * 10**tokenDecimals),
       [],
       TOKEN_2022_PROGRAM_ID
-    ),
-
-    // Remove mint authority to fix supply
-    createSetAuthorityInstruction(
-      mintKeypair.publicKey,
-      wallet.publicKey,
-      AuthorityType.MintTokens,
-      null,
-      [],
-      TOKEN_2022_PROGRAM_ID
     )
   );
 
@@ -271,7 +261,7 @@ async function main() {
 
   spinner.succeed(`Token created with fixed supply: ${mintKeypair.publicKey.toBase58()}`);
   console.log(chalk.green(`Transaction signature: ${signature}`));
-  console.log(chalk.blue(`Mint Authority: None (fixed supply)`));
+  console.log(chalk.blue(`Mint Authority: ${wallet.publicKey.toBase58()}`));
   console.log(chalk.blue(`Freeze Authority: None`));
   console.log(chalk.blue(`Initial Supply: ${initialSupply} tokens`));
   console.log(chalk.blue(`Token Account: ${tokenAccount.toBase58()}`));
@@ -298,6 +288,27 @@ async function main() {
       );
       console.log('Metadata created with signature:', metadataSignature);
       metadataAddress = metadataSignature;
+
+      // Now that metadata is created, remove mint authority
+      const removeMintAuthorityTx = new Transaction().add(
+        createSetAuthorityInstruction(
+          mintKeypair.publicKey,
+          wallet.publicKey,
+          AuthorityType.MintTokens,
+          null,
+          [],
+          TOKEN_2022_PROGRAM_ID
+        )
+      );
+
+      const removeMintAuthSig = await sendAndConfirmTransaction(
+        connection,
+        removeMintAuthorityTx,
+        [wallet],
+        { commitment: 'confirmed', skipPreflight: true }
+      );
+      console.log('Mint authority removed with signature:', removeMintAuthSig);
+
     } catch (error) {
       console.error('Error creating metadata:', error);
       throw error;
@@ -333,7 +344,7 @@ async function main() {
   console.log(chalk.blue(`Max Fee: ${maxFee > BigInt(0) ? Number(maxFee) / 10**tokenDecimals : 'None (unlimited)'}`));
   console.log(chalk.blue(`Token Account: ${tokenAccount.toBase58()}`));
   console.log(chalk.blue(`Harvestable Fees: Enabled`));
-  console.log(chalk.blue(`Mint Authority: None (fixed supply)`));
+  console.log(chalk.blue(`Mint Authority: ${wallet.publicKey.toBase58()}`));
   
   if (tokenConfig.metadata) {
     console.log(chalk.blue(`Metadata: ${tokenConfig.metadata.description}`));

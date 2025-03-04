@@ -1,14 +1,17 @@
 {
   "name": "token-scripts",
   "version": "1.0.0",
-  "description": "Utility scripts for token operations on Solana",
-  "main": "index.js",
+  "description": "Scripts for token management",
+  "main": "convert-private-key.js",
   "scripts": {
     "start-validator": "solana-test-validator --reset",
     "create-wallet:local": "ts-node src/scripts/create-wallet.ts --env=local",
     "create-wallet:testnet": "ts-node src/scripts/create-wallet.ts --env=testnet",
     "create-wallet:mainnet": "ts-node src/scripts/create-wallet.ts --env=mainnet-beta",
     "fund-wallet:local": "ts-node src/scripts/fund-wallet.ts --env=local",
+    "transfer-sol:local": "ts-node src/scripts/wallet/transfer-sol.ts --env=local",
+    "transfer-sol:testnet": "ts-node src/scripts/wallet/transfer-sol.ts --env=testnet",
+    "transfer-sol:mainnet": "ts-node src/scripts/wallet/transfer-sol.ts --env=mainnet-beta",
     "create-token:local": "ts-node src/scripts/token/create-token-with-harvestable-fees.ts --env=local",
     "create-token:testnet": "ts-node src/scripts/token/create-token-with-harvestable-fees.ts --env=testnet",
     "create-token:mainnet": "ts-node src/scripts/token/create-token-with-harvestable-fees.ts --env=mainnet-beta",
@@ -64,13 +67,14 @@
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
     "lodash": "^4.17.21",
-    "ora": "^5.4.1"
+    "ora": "^5.4.1",
+    "bs58": "^5.0.0"
   },
   "devDependencies": {
     "@types/bn.js": "^5.1.5",
     "@types/lodash": "^4.14.202",
     "@types/node": "^20.10.5",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.8.2"
   }
 }

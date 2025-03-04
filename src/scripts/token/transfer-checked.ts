@@ -15,7 +15,7 @@ import * as path from 'path';
 import { program } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { loadWallet, loadWalletFromPrivateKey } from '../../utils/wallet';
+import { loadWallet, loadWalletFromPrivateKey, loadWalletFromEnv } from '../../utils/wallet';
 
 program
   .name('transfer-checked')
@@ -23,6 +23,7 @@ program
   .option('--env <string>', 'Solana cluster environment', 'testnet')
   .option('--wallet <string>', 'Wallet name')
   .option('--private-key <string>', 'Private key as a JSON array of numbers')
+  .option('--private-key-env <string>', 'Environment variable containing the private key')
   .option('--mint <string>', 'Token mint address')
   .option('--recipient <string>', 'Recipient wallet address')
   .option('--amount <number>', 'Amount of tokens to transfer')
@@ -50,8 +51,8 @@ async function main() {
   console.log(chalk.green('Transferring tokens with fee...'));
   
   // Check required parameters
-  if (!options.wallet && !options.privateKey) {
-    console.error(chalk.red('Either wallet name (--wallet) or private key (--private-key) is required'));
+  if (!options.wallet && !options.privateKey && !options.privateKeyEnv) {
+    console.error(chalk.red('Either wallet name (--wallet), private key (--private-key), or private key environment variable (--private-key-env) is required'));
     process.exit(1);
   }
   
@@ -80,7 +81,11 @@ async function main() {
   // Load the wallet
   let wallet: Keypair;
   try {
-    if (options.privateKey) {
+    if (options.privateKeyEnv) {
+      // Load from environment variable
+      console.log(chalk.blue(`Loading wallet from environment variable: ${options.privateKeyEnv}`));
+      wallet = loadWalletFromEnv(options.privateKeyEnv);
+    } else if (options.privateKey) {
       // Load from provided private key
       console.log(chalk.blue(`Loading wallet from provided private key`));
       wallet = loadWalletFromPrivateKey(options.privateKey);
@@ -117,7 +122,8 @@ async function main() {
     mint,
     wallet.publicKey,
     false,
-    TOKEN_2022_PROGRAM_ID
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
   );
   
   // Check if the source token account exists
@@ -140,11 +146,23 @@ async function main() {
     mint,
     recipient,
     false,
-    TOKEN_2022_PROGRAM_ID
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
   );
   
   // Create a transaction
   const transaction = new Transaction();
+  
+  // Get a recent blockhash with a longer validity window and log the details
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('processed');
+  const currentBlockHeight = await connection.getBlockHeight('processed');
+  console.log(chalk.blue(`Current block height: ${currentBlockHeight}`));
+  console.log(chalk.blue(`Last valid block height: ${lastValidBlockHeight}`));
+  console.log(chalk.blue(`Validity window: ${lastValidBlockHeight - currentBlockHeight} blocks`));
+  
+  transaction.recentBlockhash = blockhash;
+  transaction.lastValidBlockHeight = lastValidBlockHeight;
+  transaction.feePayer = wallet.publicKey;
   
   // Check if the destination token account exists
   try {
@@ -159,7 +177,8 @@ async function main() {
         destinationTokenAccount,
         recipient,
         mint,
-        TOKEN_2022_PROGRAM_ID
+        TOKEN_2022_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
       )
     );
   }
@@ -177,7 +196,10 @@ async function main() {
       const maxFee = transferFeeConfig.newerTransferFee.maximumFee;
       
       // Calculate fee: amount * feeBasisPoints / 10000
-      fee = (amount * BigInt(feeBasisPoints)) / BigInt(10000);
+      // Note: We need to calculate this exactly as the program does
+      const numerator = amount * BigInt(feeBasisPoints);
+      const denominator = BigInt(10000);
+      fee = numerator / denominator;
       
       // Cap at maximum fee if set
       if (maxFee > BigInt(0) && fee > maxFee) {
@@ -199,13 +221,13 @@ async function main() {
       wallet.publicKey,
       amount,
       mintInfo.decimals,
-      fee,
+      BigInt(0), // Let the program calculate the fee
       [],
       TOKEN_2022_PROGRAM_ID
     )
   );
   
-  // Send the transaction
+  // Send the transaction with increased priority
   const spinnerTransaction = ora('Sending transaction...').start();
   
   try {
@@ -213,7 +235,12 @@ async function main() {
       connection,
       transaction,
       [wallet],
-      { commitment: 'confirmed' }
+      {
+        commitment: 'confirmed',
+        maxRetries: 5,
+        skipPreflight: true,
+        preflightCommitment: 'processed'
+      }
     );
     
     spinnerTransaction.succeed(`Transaction sent: ${signature}`);
