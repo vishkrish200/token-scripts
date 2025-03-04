@@ -16,7 +16,7 @@ CONFIG_FILE="token-configs/env-token.json"
 # Create the token-configs directory if it doesn't exist
 mkdir -p token-configs
 
-# Create the token configuration JSON
+# Create the token configuration JSON with explicit metadata extension
 cat > $CONFIG_FILE << EOF
 {
   "name": "${TOKEN_NAME:-"Env Token"}",
@@ -26,9 +26,11 @@ cat > $CONFIG_FILE << EOF
   "feeBasisPoints": ${TOKEN_FEE_BASIS_POINTS:-100},
   "maxFee": ${TOKEN_MAX_FEE:-10},
   "metadata": {
-    "description": "${TOKEN_DESCRIPTION:-"Token created from environment variables"}",
-    "image": "${TOKEN_IMAGE_URL:-""}",
-    "external_url": "${TOKEN_EXTERNAL_URL:-""}"
+    "name": "${TOKEN_NAME:-"Env Token"}",
+    "symbol": "${TOKEN_SYMBOL:-"ENV"}",
+    "description": "${TOKEN_METADATA_DESCRIPTION:-"A token created from environment variables"}",
+    "uri": "${TOKEN_METADATA_URI:-""}",
+    "isMutable": true
   }
 }
 EOF
@@ -37,7 +39,7 @@ echo "Created token configuration file: $CONFIG_FILE"
 cat $CONFIG_FILE
 
 # Create the token using the configuration file and environment variable for the private key
-echo "Creating token..."
-npm run create-token-from-config:local -- --private-key-env=TOKEN_CREATOR_PRIVATE_KEY --config=$CONFIG_FILE
+echo "Creating token on mainnet with metadata..."
+npm run create-token-from-config:mainnet -- --private-key-env=TOKEN_CREATOR_PRIVATE_KEY --config=$CONFIG_FILE
 
 echo "Done!" 

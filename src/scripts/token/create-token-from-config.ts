@@ -24,6 +24,7 @@ import {
   loadWalletFromFile 
 } from '../../utils/wallet';
 import { loadTokenConfig, TokenConfig } from '../../utils/token-config';
+import { createTokenMetadata, generateMetadataJson } from '../../utils/metadata';
 
 // Load environment variables
 dotenv.config();
@@ -68,6 +69,22 @@ function saveTokenInfo(tokenName: string, tokenInfo: any) {
   const filePath = path.join(tokenInfoDir, fileName);
   fs.writeFileSync(filePath, JSON.stringify(tokenInfo, null, 2));
   console.log(chalk.blue(`Token information saved to ${filePath}`));
+}
+
+// Interface for token info
+interface TokenInfo {
+  name: string;
+  symbol: string;
+  decimals: number;
+  mintAddress: string;
+  tokenAccount: string;
+  initialSupply: number;
+  feeBasisPoints: number;
+  maxFee: number;
+  createdAt: string;
+  environment: string;
+  metadata?: TokenConfig['metadata'];
+  metadataAddress?: string;
 }
 
 async function main() {
@@ -141,6 +158,7 @@ async function main() {
   const initialSupply = tokenConfig.initialSupply;
   const feeBasisPoints = tokenConfig.feeBasisPoints;
   const maxFee = BigInt(tokenConfig.maxFee * 10**tokenDecimals);
+  const metadata = tokenConfig.metadata;
   
   console.log(chalk.blue(`Creating token: ${tokenName} (${tokenSymbol})`));
   console.log(chalk.blue(`Decimals: ${tokenDecimals}`));
@@ -281,32 +299,97 @@ async function main() {
   console.log(chalk.green(`Transaction signature: ${mintToSignature}`));
   
   // Save token information
-  const tokenInfo = {
+  const tokenInfo: TokenInfo = {
     name: tokenName,
     symbol: tokenSymbol,
     decimals: tokenDecimals,
     mintAddress: mintKeypair.publicKey.toBase58(),
     tokenAccount: tokenAccount.toBase58(),
-    initialSupply: initialSupply,
-    transferFee: {
-      feeBasisPoints: feeBasisPoints,
-      maxFee: tokenConfig.maxFee
-    },
-    authorities: {
-      mintAuthority: wallet.publicKey.toBase58(),
-      freezeAuthority: wallet.publicKey.toBase58(),
-      transferFeeConfigAuthority: transferFeeConfigAuthority.toBase58(),
-      withdrawWithheldAuthority: withdrawWithheldAuthority.toBase58()
-    },
-    harvestable: true,
-    metadata: tokenConfig.metadata ? {
-      description: tokenConfig.metadata.description,
-      image: tokenConfig.metadata.image,
-      external_url: tokenConfig.metadata.external_url
-    } : undefined
+    initialSupply,
+    feeBasisPoints,
+    maxFee: Number(maxFee) / 10**tokenDecimals,
+    createdAt: new Date().toISOString(),
+    environment: options.env,
+    metadata: tokenConfig.metadata
   };
   
   saveTokenInfo(tokenName, tokenInfo);
+  
+  // Create and upload metadata if provided
+  if (metadata) {
+    spinner.text = 'Creating token metadata...';
+    spinner.start();
+    
+    try {
+      // Generate metadata JSON file
+      const metadataDir = path.resolve(process.cwd(), 'metadata');
+      if (!fs.existsSync(metadataDir)) {
+        fs.mkdirSync(metadataDir, { recursive: true });
+      }
+      
+      const metadataFilePath = path.join(
+        metadataDir, 
+        `${tokenName.toLowerCase().replace(/\s+/g, '-')}-${options.env}.json`
+      );
+      
+      // Create metadata JSON with all available fields
+      const metadataJson = generateMetadataJson({
+        name: tokenName,
+        symbol: tokenSymbol,
+        description: metadata.description || `${tokenName} token`,
+        image: metadata.image || '',
+        external_url: metadata.external_url || '',
+        attributes: metadata.attributes || [],
+        properties: metadata.properties || {}
+      }, metadataFilePath);
+      
+      console.log(chalk.blue(`Metadata JSON saved to: ${metadataFilePath}`));
+      
+      // If URI is provided in metadata, use it, otherwise we can't create on-chain metadata
+      if (metadata.uri) {
+        // Create on-chain metadata
+        const metadataSignature = await createTokenMetadata(
+          connection,
+          wallet,
+          mintKeypair.publicKey,
+          tokenName,
+          tokenSymbol,
+          metadata.uri
+        );
+        
+        spinner.succeed(`Token metadata created on-chain`);
+        console.log(chalk.green(`Metadata transaction signature: ${metadataSignature}`));
+        
+        // Update token info with metadata
+        tokenInfo.metadataAddress = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from('metadata'),
+            new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s').toBuffer(),
+            mintKeypair.publicKey.toBuffer(),
+          ],
+          new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
+        )[0].toBase58();
+        
+        // Save updated token info
+        saveTokenInfo(tokenName, tokenInfo);
+      } else {
+        spinner.warn(`No metadata URI provided. On-chain metadata not created.`);
+        console.log(chalk.yellow(`To create on-chain metadata, add a 'uri' field to your metadata configuration.`));
+        console.log(chalk.yellow(`The URI should point to a hosted JSON file with your token metadata.`));
+      }
+    } catch (error) {
+      spinner.fail(`Failed to create token metadata`);
+      console.error(chalk.red(`Error creating metadata: ${error}`));
+    }
+  } else {
+    console.log(chalk.yellow('No metadata configuration provided.'));
+    console.log(chalk.yellow('To add metadata, include a "metadata" object in your token configuration.'));
+  }
+  
+  console.log(chalk.green(`\nToken created successfully!`));
+  console.log(chalk.blue(`Mint Address: ${mintKeypair.publicKey.toBase58()}`));
+  console.log(chalk.blue(`Token Account: ${tokenAccount.toBase58()}`));
+  console.log(chalk.blue(`Initial Supply: ${initialSupply} tokens`));
   
   console.log(chalk.green('\nToken Creation Summary:'));
   console.log(chalk.blue(`Token Name: ${tokenName}`));

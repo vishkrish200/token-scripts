@@ -13,6 +13,7 @@ export interface TokenConfig {
   maxFee: number;
   metadata?: {
     description: string;
+    uri?: string;
     image?: string;
     external_url?: string;
     attributes?: { trait_type: string; value: string }[];
