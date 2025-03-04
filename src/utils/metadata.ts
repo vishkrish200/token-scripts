@@ -1,14 +1,8 @@
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { 
-  CreateMetadataAccountV3InstructionAccounts,
-  CreateMetadataAccountV3InstructionArgs,
-  createCreateMetadataAccountV3Instruction,
-  PROGRAM_ID as METADATA_PROGRAM_ID,
-  DataV2,
-  Creator,
-  Collection,
-  Uses
-} from '@metaplex-foundation/mpl-token-metadata';
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
+import { createMetadataAccountV3 } from '@metaplex-foundation/mpl-token-metadata';
+import { signerIdentity, generateSigner, createSignerFromKeypair } from '@metaplex-foundation/umi';
+import { fromWeb3JsKeypair, fromWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -32,69 +26,45 @@ export async function createTokenMetadata(
   uri: string,
   creators?: { address: PublicKey; share: number; verified: boolean }[]
 ): Promise<string> {
-  // Derive the metadata account address
-  const [metadataAccount] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('metadata'),
-      METADATA_PROGRAM_ID.toBuffer(),
-      mint.toBuffer(),
-    ],
-    METADATA_PROGRAM_ID
-  );
-
-  // Convert creators to the required format
-  const metadataCreators = creators ? 
-    creators.map(c => new Creator({
-      address: c.address.toString(),
-      share: c.share,
-      verified: c.verified
-    })) : 
-    null;
-
-  // Create the metadata
-  const data: DataV2 = {
-    name,
-    symbol,
-    uri,
-    sellerFeeBasisPoints: 0,
-    creators: metadataCreators,
-    collection: null,
-    uses: null,
-  };
-
-  // Create the instruction
-  const accounts: CreateMetadataAccountV3InstructionAccounts = {
-    metadata: metadataAccount,
-    mint,
-    mintAuthority: payer.publicKey,
-    payer: payer.publicKey,
-    updateAuthority: payer.publicKey,
-  };
-
-  const args: CreateMetadataAccountV3InstructionArgs = {
-    createMetadataAccountArgsV3: {
-      data,
-      isMutable: true,
-      collectionDetails: null,
-    }
-  };
-
-  const instruction = createCreateMetadataAccountV3Instruction(
-    accounts,
-    args
-  );
-
-  // Create and send the transaction
-  const transaction = new Transaction().add(instruction);
+  // Create Umi instance
+  const umi = createUmi(connection.rpcEndpoint);
   
-  const signature = await sendAndConfirmTransaction(
-    connection,
-    transaction,
-    [payer],
-    { commitment: 'confirmed' }
-  );
+  // Convert Web3.js types to Umi types
+  const umiSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
+  const umiMint = fromWeb3JsPublicKey(mint);
+  
+  // Set the signer
+  umi.use(signerIdentity(umiSigner));
+  
+  // Create metadata
+  const builder = createMetadataAccountV3(umi, {
+    mint: umiMint,
+    mintAuthority: umiSigner,
+    updateAuthority: umiSigner.publicKey,
+    data: {
+      name,
+      symbol,
+      uri,
+      sellerFeeBasisPoints: 0,
+      creators: creators ? creators.map(c => ({
+        address: fromWeb3JsPublicKey(c.address),
+        verified: c.verified,
+        share: c.share,
+      })) : null,
+      collection: null,
+      uses: null,
+    },
+    isMutable: true,
+    collectionDetails: null,
+  });
 
-  return signature;
+  try {
+    const result = await builder.sendAndConfirm(umi);
+    return result.signature.toString();
+  } catch (error) {
+    console.error('Error creating metadata:', error);
+    throw error;
+  }
 }
 
 /**
