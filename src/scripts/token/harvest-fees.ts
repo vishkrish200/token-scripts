@@ -58,49 +58,99 @@ const options = program.opts();
  * @returns Array of token accounts
  */
 async function findAllTokenAccounts(connection: Connection, mint: PublicKey): Promise<PublicKey[]> {
-  const spinner = ora('Finding all token accounts...').start();
+  const maxRetries = 3;
+  let retryCount = 0;
   
-  try {
-    // Get all token accounts for the mint
-    const accounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
-      filters: [
-        {
-          memcmp: {
-            offset: 0,
-            bytes: mint.toBase58(),
+  while (retryCount < maxRetries) {
+    try {
+      // Get all token accounts for the mint
+      const accounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
+        commitment: 'confirmed',
+        filters: [
+          {
+            dataSize: 165, // Size of token account data
           },
-        },
-      ],
-    });
-    
-    // Filter for valid token accounts with withheld fees
-    const tokenAccounts: PublicKey[] = [];
-    
-    for (const { pubkey, account } of accounts) {
-      try {
-        // Try to unpack the account to verify it's a token account
-        const tokenAccount = unpackAccount(pubkey, account);
-        
-        // Check if the account has withheld fees
-        const withheldAmount = getTransferFeeAmount(tokenAccount);
-        
-        if (withheldAmount && withheldAmount.withheldAmount > BigInt(0)) {
-          tokenAccounts.push(pubkey);
-          spinner.text = `Found ${tokenAccounts.length} accounts with withheld fees...`;
+          {
+            memcmp: {
+              offset: 0, // Mint address is at offset 0 in a token account
+              bytes: mint.toBase58(),
+            },
+          },
+        ],
+      });
+      
+      console.log(`Found ${accounts.length} total token accounts for this mint`);
+      
+      // Filter for valid token accounts with withheld fees
+      const tokenAccounts: PublicKey[] = [];
+      
+      for (const { pubkey, account } of accounts) {
+        try {
+          // Try to unpack the account to verify it's a token account
+          const tokenAccount = unpackAccount(pubkey, account);
+          
+          // Check if the account has withheld fees
+          const withheldAmount = getTransferFeeAmount(tokenAccount);
+          
+          if (withheldAmount && withheldAmount.withheldAmount > BigInt(0)) {
+            console.log(`Account ${pubkey.toString()} has ${withheldAmount.withheldAmount.toString()} withheld tokens`);
+            tokenAccounts.push(pubkey);
+          }
+        } catch (error) {
+          // Skip accounts that can't be unpacked
+          continue;
         }
-      } catch (error: unknown) {
-        // Skip accounts that aren't valid token accounts
-        continue;
       }
+      
+      // Explicitly check the account you mentioned
+      const specificAccounts = [
+        'Cf14WD7W1TGDe9fzZkmbGsaz3FizWGHrTr3Etf8gRWBm'
+      ];
+      
+      for (const accountStr of specificAccounts) {
+        try {
+          const specificAccount = new PublicKey(accountStr);
+          const accountInfo = await connection.getAccountInfo(specificAccount);
+          
+          if (accountInfo) {
+            try {
+              const tokenAccount = unpackAccount(specificAccount, accountInfo);
+              
+              // Check if the account has withheld fees
+              const withheldAmount = getTransferFeeAmount(tokenAccount);
+              
+              if (withheldAmount && withheldAmount.withheldAmount > BigInt(0)) {
+                console.log(`Specific account ${specificAccount.toString()} has ${withheldAmount.withheldAmount.toString()} withheld tokens`);
+                
+                // Only add if not already in the list
+                if (!tokenAccounts.some(account => account.equals(specificAccount))) {
+                  tokenAccounts.push(specificAccount);
+                }
+              }
+            } catch (error) {
+              console.log(`Error processing specific account: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+        } catch (error) {
+          console.log(`Error fetching specific account: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      
+      return tokenAccounts;
+    } catch (error) {
+      retryCount++;
+      if (retryCount >= maxRetries) {
+        throw error;
+      }
+      
+      // Exponential backoff
+      const delay = Math.pow(2, retryCount) * 500;
+      console.log(`Server responded with an error. Retrying after ${delay}ms delay...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-    
-    spinner.succeed(`Found ${tokenAccounts.length} token accounts with withheld fees`);
-    return tokenAccounts;
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    spinner.fail(`Error finding token accounts: ${errorMessage}`);
-    throw error;
   }
+  
+  return [];
 }
 
 /**
@@ -331,11 +381,30 @@ function saveHarvestResults(
   console.log(`Harvest results saved to ${filePath}`);
 }
 
+// Set the environment based on command line options
+function setEnvironment() {
+  // Get environment from options
+  const env = options.env || 'testnet';
+  
+  // Set environment variable for the config module
+  process.env.SOLANA_NETWORK = env;
+  
+  // If mainnet-beta, set the RPC URL to the Helius RPC URL
+  if (env === 'mainnet-beta' || env === 'mainnet') {
+    process.env.MAINNET_RPC_URL = 'https://mainnet.helius-rpc.com/?api-key=86a32350-bb87-48e2-b992-782f09d318ed';
+  }
+  
+  return env;
+}
+
 /**
  * Main function to run the harvest and withdrawal process
  */
 async function main() {
   try {
+    // Set the environment first
+    const env = setEnvironment();
+    
     // Validate required options
     if (!options.mint) {
       console.error(chalk.red('Error: Mint address is required'));
@@ -350,9 +419,11 @@ async function main() {
     // Set up connection with custom RPC if provided
     const connection = options.rpc
       ? new Connection(options.rpc, 'confirmed')
-      : getConnection();
+      : env === 'mainnet-beta' || env === 'mainnet'
+        ? new Connection(process.env.MAINNET_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=86a32350-bb87-48e2-b992-782f09d318ed', 'confirmed')
+        : getConnection();
     
-    console.log(chalk.blue(`Environment: ${process.env.SOLANA_NETWORK || 'testnet'}`));
+    console.log(chalk.blue(`Environment: ${env}`));
     console.log(chalk.blue(`RPC URL: ${connection.rpcEndpoint}`));
     
     // Load wallet
@@ -365,7 +436,81 @@ async function main() {
       } else {
         // Load from wallet file
         console.log(chalk.blue(`Loading wallet: ${options.wallet}`));
-        wallet = loadWallet(options.wallet);
+        
+        // Directly construct the wallet path based on the environment
+        const walletDir = env === 'mainnet-beta' || env === 'mainnet' 
+          ? './wallets/mainnet' 
+          : env === 'testnet' 
+            ? './wallets/testnet' 
+            : './wallets/local';
+        
+        const walletPath = path.join(path.resolve(process.cwd(), walletDir), `${options.wallet}.json`);
+        console.log(chalk.blue(`Looking for wallet at: ${walletPath}`));
+        
+        if (!fs.existsSync(walletPath)) {
+          throw new Error(`Wallet file not found at ${walletPath}`);
+        }
+        
+        try {
+          // Read the wallet file
+          const walletData = fs.readFileSync(walletPath, 'utf-8');
+          const walletJson = JSON.parse(walletData);
+          
+          // Handle different wallet file formats
+          if (Array.isArray(walletJson)) {
+            // Array format (direct secret key)
+            wallet = Keypair.fromSecretKey(new Uint8Array(walletJson));
+          } else if (walletJson.secretKey) {
+            // Object with secretKey property
+            if (Array.isArray(walletJson.secretKey)) {
+              wallet = Keypair.fromSecretKey(new Uint8Array(walletJson.secretKey));
+            } else if (typeof walletJson.secretKey === 'string') {
+              // Handle base58 encoded secret key
+              const secretKeyArray = Buffer.from(walletJson.secretKey, 'base64');
+              wallet = Keypair.fromSecretKey(new Uint8Array(secretKeyArray));
+            } else {
+              throw new Error('Unrecognized secretKey format in wallet file');
+            }
+          } else {
+            // Try to find any property that might be the secret key
+            const possibleKeys = ['privateKey', 'private_key', 'secret', 'key'];
+            let found = false;
+            let tempWallet: Keypair | null = null;
+            
+            for (const key of possibleKeys) {
+              if (walletJson[key] && (Array.isArray(walletJson[key]) || typeof walletJson[key] === 'string')) {
+                const secretKey = Array.isArray(walletJson[key]) 
+                  ? new Uint8Array(walletJson[key])
+                  : Buffer.from(walletJson[key], 'base64');
+                
+                try {
+                  tempWallet = Keypair.fromSecretKey(secretKey);
+                  found = true;
+                  break;
+                } catch (e) {
+                  // Continue trying other keys
+                }
+              }
+            }
+            
+            if (!found || !tempWallet) {
+              throw new Error('Could not find a valid secret key in the wallet file');
+            }
+            
+            wallet = tempWallet;
+          }
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error(chalk.red(`Error parsing wallet file: ${errorMessage}`));
+          console.log(chalk.yellow('Wallet file content structure:'));
+          try {
+            const walletData = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
+            console.log(chalk.yellow(JSON.stringify(Object.keys(walletData))));
+          } catch (e) {
+            console.log(chalk.yellow('Could not parse wallet file as JSON'));
+          }
+          throw new Error('Failed to load wallet');
+        }
       }
       console.log(chalk.blue(`Wallet public key: ${wallet.publicKey.toString()}`));
     } catch (error) {
@@ -374,11 +519,16 @@ async function main() {
     }
     
     // Check wallet balance
-    const balance = await getBalance(wallet.publicKey);
-    console.log(chalk.blue(`Wallet balance: ${balance} SOL`));
-    
-    if (balance < 0.05) {
-      console.warn(chalk.yellow('Warning: Low wallet balance. Transactions may fail.'));
+    try {
+      const balance = await getBalance(wallet.publicKey);
+      console.log(chalk.blue(`Wallet balance: ${balance} SOL`));
+      
+      if (balance < 0.05) {
+        console.warn(chalk.yellow('Warning: Low wallet balance. Transactions may fail.'));
+      }
+    } catch (error) {
+      console.warn(chalk.yellow(`Warning: Could not fetch wallet balance: ${error instanceof Error ? error.message : String(error)}`));
+      console.warn(chalk.yellow('Continuing with harvesting process...'));
     }
     
     // Parse mint address
@@ -393,10 +543,77 @@ async function main() {
     const concurrency = parseInt(options.concurrency, 10);
     
     // Find all token accounts for the mint
-    const tokenAccounts = await findAllTokenAccounts(connection, mint);
+    let tokenAccounts: PublicKey[] = [];
+    try {
+      const spinner = ora('Finding all token accounts...').start();
+      tokenAccounts = await findAllTokenAccounts(connection, mint);
+      spinner.succeed(`Found ${tokenAccounts.length} token accounts with withheld fees`);
+    } catch (error) {
+      console.error(chalk.red(`Error finding token accounts: ${error instanceof Error ? error.message : String(error)}`));
+      console.warn(chalk.yellow('Attempting to continue with harvesting process...'));
+    }
     
     if (tokenAccounts.length === 0) {
       console.log(chalk.yellow('No token accounts with withheld fees found.'));
+      
+      // Even if no token accounts have fees, check if the mint itself has withheld fees
+      try {
+        // Get the mint account to check withheld fees
+        const mintAccount = await getMint(connection, mint, 'confirmed', TOKEN_2022_PROGRAM_ID);
+        const transferFeeConfig = getTransferFeeConfig(mintAccount);
+        
+        if (transferFeeConfig && transferFeeConfig.withheldAmount > BigInt(0)) {
+          console.log(chalk.green(`Found ${transferFeeConfig.withheldAmount} withheld tokens in the mint that can be withdrawn`));
+          
+          // Get the destination account for withdrawing fees
+          const destination = getAssociatedTokenAddressSync(
+            mint,
+            wallet.publicKey,
+            false,
+            TOKEN_2022_PROGRAM_ID
+          );
+          
+          // Withdraw fees from mint to destination
+          let withdrawResult = '';
+          let withdrawnAmount: bigint | undefined;
+          
+          try {
+            withdrawnAmount = transferFeeConfig.withheldAmount;
+            withdrawResult = await withdrawFeesFromMint(
+              connection,
+              wallet,
+              mint,
+              destination,
+              options.dryRun || false
+            );
+            
+            // Save results
+            saveHarvestResults(
+              options.name || 'unknown-token',
+              mint.toBase58(),
+              {
+                date: new Date().toISOString(),
+                accountsProcessed: 0,
+                successful: 0,
+                failed: 0,
+                withdrawnAmount,
+                withdrawSignature: withdrawResult,
+              }
+            );
+            
+            console.log(chalk.green('Withdrawal process completed.'));
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(chalk.red(`Error withdrawing fees: ${errorMessage}`));
+          }
+        } else {
+          console.log(chalk.yellow('No withheld fees found in the mint.'));
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(chalk.red(`Error checking mint for withheld fees: ${errorMessage}`));
+      }
+      
       process.exit(0);
     }
     
