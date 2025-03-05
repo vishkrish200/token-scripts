@@ -160,7 +160,11 @@ async function main() {
   const tokenDecimals = tokenConfig.decimals;
   const initialSupply = tokenConfig.initialSupply;
   const feeBasisPoints = tokenConfig.feeBasisPoints;
-  const maxFee = BigInt(tokenConfig.maxFee * 10**tokenDecimals);
+  // Use the maximum possible u64 value (2^64-1) for maxFee when maxFee is very large
+  const maxFeeValue = tokenConfig.maxFee >= Number.MAX_SAFE_INTEGER / 10**tokenDecimals 
+    ? BigInt('18446744073709551615') // Maximum u64 value (2^64-1)
+    : BigInt(Math.floor(tokenConfig.maxFee * 10**tokenDecimals));
+  const maxFee = maxFeeValue;
   const metadata = tokenConfig.metadata;
   
   console.log(chalk.blue(`Creating token: ${tokenName} (${tokenSymbol})`));
