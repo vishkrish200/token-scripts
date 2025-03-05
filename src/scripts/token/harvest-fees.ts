@@ -63,8 +63,11 @@ async function findAllTokenAccounts(connection: Connection, mint: PublicKey): Pr
   
   while (retryCount < maxRetries) {
     try {
-      // Get all token accounts for the mint
-      const accounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
+      console.log('Using multiple approaches to find token accounts with withheld fees...');
+      
+      // Approach 1: Using getProgramAccounts with dataSize filter
+      console.log('Approach 1: Using getProgramAccounts with dataSize filter');
+      const accounts1 = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
         commitment: 'confirmed',
         filters: [
           {
@@ -79,60 +82,97 @@ async function findAllTokenAccounts(connection: Connection, mint: PublicKey): Pr
         ],
       });
       
-      console.log(`Found ${accounts.length} total token accounts for this mint`);
+      console.log(`Found ${accounts1.length} token accounts using approach 1`);
       
-      // Filter for valid token accounts with withheld fees
+      // Approach 2: Using getProgramAccounts without dataSize filter
+      console.log('Approach 2: Using getProgramAccounts without dataSize filter');
+      const accounts2 = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
+        commitment: 'confirmed',
+        filters: [
+          {
+            memcmp: {
+              offset: 0, // Mint address is at offset 0 in a token account
+              bytes: mint.toBase58(),
+            },
+          },
+        ],
+      });
+      
+      console.log(`Found ${accounts2.length} token accounts using approach 2`);
+      
+      // Approach 3: Using getTokenLargestAccounts
+      console.log('Approach 3: Using getTokenLargestAccounts');
+      const largestAccounts = await connection.getTokenLargestAccounts(mint, 'confirmed');
+      
+      console.log(`Found ${largestAccounts.value.length} largest token accounts using approach 3`);
+      
+      // Combine all accounts from different approaches
+      const allAccountKeys = new Set<string>();
+      
+      // Add accounts from approach 1
+      for (const { pubkey } of accounts1) {
+        allAccountKeys.add(pubkey.toString());
+      }
+      
+      // Add accounts from approach 2
+      for (const { pubkey } of accounts2) {
+        allAccountKeys.add(pubkey.toString());
+      }
+      
+      // Add accounts from approach 3
+      for (const { address } of largestAccounts.value) {
+        allAccountKeys.add(address.toString());
+      }
+      
+      console.log(`Total unique token accounts found: ${allAccountKeys.size}`);
+      
+      // Check each account for withheld fees
       const tokenAccounts: PublicKey[] = [];
       
-      for (const { pubkey, account } of accounts) {
+      for (const accountKey of allAccountKeys) {
         try {
-          // Try to unpack the account to verify it's a token account
-          const tokenAccount = unpackAccount(pubkey, account);
+          const accountPubkey = new PublicKey(accountKey);
+          const tokenAccount = await getAccount(connection, accountPubkey, 'confirmed', TOKEN_2022_PROGRAM_ID);
           
           // Check if the account has withheld fees
           const withheldAmount = getTransferFeeAmount(tokenAccount);
           
           if (withheldAmount && withheldAmount.withheldAmount > BigInt(0)) {
-            console.log(`Account ${pubkey.toString()} has ${withheldAmount.withheldAmount.toString()} withheld tokens`);
-            tokenAccounts.push(pubkey);
+            console.log(`Account ${accountPubkey.toString()} has ${withheldAmount.withheldAmount.toString()} withheld tokens`);
+            tokenAccounts.push(accountPubkey);
           }
         } catch (error) {
-          // Skip accounts that can't be unpacked
+          // Skip accounts that can't be processed
           continue;
         }
       }
       
-      // Explicitly check the account you mentioned
-      const specificAccounts = [
-        'Cf14WD7W1TGDe9fzZkmbGsaz3FizWGHrTr3Etf8gRWBm'
-      ];
-      
-      for (const accountStr of specificAccounts) {
-        try {
-          const specificAccount = new PublicKey(accountStr);
-          const accountInfo = await connection.getAccountInfo(specificAccount);
-          
-          if (accountInfo) {
-            try {
-              const tokenAccount = unpackAccount(specificAccount, accountInfo);
+      // Add specific accounts for known tokens
+      if (mint.toString() === 'DH5Jx44EGKY9eBmX35CJBg8wJ4qnGeQiG2me62eaZ8rZ') {
+        const specificAccounts = [
+          '9WToUkyKTHwBj8p3sbpHdaET877RMDjE1QyxdJyi7Q3',
+          'EjEtw1CkiwQsXMz25ZTRDCddi8RfUnqiN8MNS3MNnn8y'
+        ];
+        
+        for (const accountStr of specificAccounts) {
+          try {
+            const accountPubkey = new PublicKey(accountStr);
+            
+            // Only add if not already in the list
+            if (!tokenAccounts.some(account => account.equals(accountPubkey))) {
+              const tokenAccount = await getAccount(connection, accountPubkey, 'confirmed', TOKEN_2022_PROGRAM_ID);
               
               // Check if the account has withheld fees
               const withheldAmount = getTransferFeeAmount(tokenAccount);
               
               if (withheldAmount && withheldAmount.withheldAmount > BigInt(0)) {
-                console.log(`Specific account ${specificAccount.toString()} has ${withheldAmount.withheldAmount.toString()} withheld tokens`);
-                
-                // Only add if not already in the list
-                if (!tokenAccounts.some(account => account.equals(specificAccount))) {
-                  tokenAccounts.push(specificAccount);
-                }
+                console.log(`Specific account ${accountPubkey.toString()} has ${withheldAmount.withheldAmount.toString()} withheld tokens`);
+                tokenAccounts.push(accountPubkey);
               }
-            } catch (error) {
-              console.log(`Error processing specific account: ${error instanceof Error ? error.message : String(error)}`);
             }
+          } catch (error) {
+            console.log(`Error processing specific account: ${error instanceof Error ? error.message : String(error)}`);
           }
-        } catch (error) {
-          console.log(`Error fetching specific account: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       
