@@ -26,7 +26,7 @@ import {
   loadWalletFromFile 
 } from '../../utils/wallet';
 import { loadTokenConfig, TokenConfig } from '../../utils/token-config';
-import { createTokenMetadata, generateMetadataJson } from '../../utils/metadata';
+import { createTokenMetadata, generateMetadataJson, uploadMetadata, uploadImage } from '../../utils/metadata';
 
 // Load environment variables
 dotenv.config();
@@ -87,6 +87,7 @@ interface TokenInfo {
   environment: string;
   metadata?: TokenConfig['metadata'];
   metadataAddress?: string;
+  metadataUri?: string;
 }
 
 async function main() {
@@ -181,6 +182,21 @@ async function main() {
   // Define the extensions to use
   const extensions = [ExtensionType.TransferFeeConfig];
   
+  // Initialize token info object
+  let tokenInfo: TokenInfo = {
+    name: tokenName,
+    symbol: tokenSymbol,
+    decimals: tokenDecimals,
+    mintAddress: mintKeypair.publicKey.toBase58(),
+    tokenAccount: '', // Will be filled in later
+    initialSupply,
+    feeBasisPoints,
+    maxFee: Number(maxFee),
+    createdAt: new Date().toISOString(),
+    environment: options.env,
+    metadata: metadata
+  };
+  
   // Calculate space required for the mint
   const mintLen = getMintLen(extensions);
   
@@ -199,7 +215,10 @@ async function main() {
     TOKEN_2022_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID
   );
-
+  
+  // Update token account in token info
+  tokenInfo.tokenAccount = tokenAccount.toBase58();
+  
   // Create a transaction to create the mint account and initialize it
   const transaction = new Transaction().add(
     // Create the mint account
@@ -269,24 +288,60 @@ async function main() {
   // Create metadata if metadata config is provided
   let metadataAddress: string | undefined;
   if (metadata) {
-    console.log('Creating metadata...');
+    spinner.text = 'Creating token metadata...';
     try {
       // Convert creator addresses from strings to PublicKey objects
-      const creators = metadata.creators?.map(creator => ({
-        ...creator,
-        address: new PublicKey(creator.address)
+      const creators = metadata.properties?.creators?.map((creator: { address: string; share: number }) => ({
+        address: new PublicKey(creator.address),
+        share: creator.share,
+        verified: false // Initially set to false, can be verified later
       }));
 
+      // Prepare metadata object
+      const metadataObject = {
+        name: metadata.name || tokenName,
+        symbol: metadata.symbol || tokenSymbol,
+        description: metadata.description,
+        image: metadata.image,
+        external_url: metadata.external_url,
+        attributes: metadata.attributes,
+        properties: metadata.properties
+      };
+
+      // If there's a local image file, upload it
+      if (metadata.image && metadata.image.startsWith('./')) {
+        try {
+          const imagePath = path.resolve(process.cwd(), metadata.image);
+          if (fs.existsSync(imagePath)) {
+            const imageUri = await uploadImage(connection, wallet, imagePath);
+            metadataObject.image = imageUri;
+            console.log(chalk.blue(`Image uploaded to: ${imageUri}`));
+          } else {
+            console.warn(chalk.yellow(`Image file not found: ${imagePath}`));
+          }
+        } catch (error: any) {
+          console.warn(chalk.yellow(`Error uploading image: ${error.message}`));
+        }
+      }
+
+      // Upload metadata to Arweave
+      const metadataUri = await uploadMetadata(connection, wallet, metadataObject);
+      console.log(chalk.blue(`Metadata URI: ${metadataUri}`));
+
+      // Store the URI for later use
+      tokenInfo.metadataUri = metadataUri;
+
+      // Create on-chain metadata
       const metadataSignature = await createTokenMetadata(
         connection,
         wallet,
         mintKeypair,
-        metadata.name,
-        metadata.symbol,
-        metadata.uri,
+        metadata.name || tokenName,
+        metadata.symbol || tokenSymbol,
+        metadataUri,
         creators
       );
-      console.log('Metadata created with signature:', metadataSignature);
+      console.log(chalk.blue('Metadata created with signature:', metadataSignature));
       metadataAddress = metadataSignature;
 
       // Now that metadata is created, remove mint authority
@@ -307,30 +362,18 @@ async function main() {
         [wallet],
         { commitment: 'confirmed', skipPreflight: true }
       );
-      console.log('Mint authority removed with signature:', removeMintAuthSig);
+      console.log(chalk.blue('Mint authority removed with signature:', removeMintAuthSig));
 
     } catch (error) {
-      console.error('Error creating metadata:', error);
-      throw error;
+      console.error(chalk.red('Error creating metadata:'), error);
+      spinner.fail('Failed to create metadata');
     }
   }
 
-  // Save token information
-  const tokenInfo: TokenInfo = {
-    name: tokenName,
-    symbol: tokenSymbol,
-    decimals: tokenDecimals,
-    mintAddress: mintKeypair.publicKey.toBase58(),
-    tokenAccount: tokenAccount.toBase58(),
-    initialSupply,
-    feeBasisPoints,
-    maxFee: Number(maxFee),
-    createdAt: new Date().toISOString(),
-    environment: options.env,
-    metadata: metadata,
-    metadataAddress
-  };
+  // Update token info with metadata address
+  tokenInfo.metadataAddress = metadataAddress;
 
+  // Save token information
   saveTokenInfo(tokenName, tokenInfo);
   spinner.succeed('Token creation completed successfully!');
   
@@ -348,8 +391,8 @@ async function main() {
   
   if (tokenConfig.metadata) {
     console.log(chalk.blue(`Metadata: ${tokenConfig.metadata.description}`));
-    console.log(chalk.yellow('Note: On-chain metadata creation is not supported in this version.'));
-    console.log(chalk.yellow('You can add metadata manually using the Metaplex CLI or other tools.'));
+    console.log(chalk.blue(`Metadata URI: ${tokenInfo.metadataUri || 'Not available'}`));
+    console.log(chalk.blue(`Metadata Address: ${metadataAddress || 'Not available'}`));
   }
   
   console.log(chalk.yellow('\nIMPORTANT: For proper fee harvesting, use the transfer-checked script:'));

@@ -9,10 +9,114 @@ import {
   signerIdentity, 
   createSignerFromKeypair,
   percentAmount,
+  createGenericFile,
 } from '@metaplex-foundation/umi';
+import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import { fromWeb3JsKeypair, fromWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/**
+ * Upload metadata to Arweave via Irys
+ * @param connection Solana connection
+ * @param payer Keypair of the payer
+ * @param metadata Metadata object
+ * @returns URI of the uploaded metadata
+ */
+export async function uploadMetadata(
+  connection: Connection,
+  payer: Keypair,
+  metadata: {
+    name: string;
+    symbol: string;
+    description: string;
+    image?: string;
+    external_url?: string;
+    attributes?: { trait_type: string; value: string }[];
+    properties?: Record<string, any>;
+  }
+): Promise<string> {
+  try {
+    // Create Umi instance with RPC endpoint and Irys uploader
+    const umi = createUmi(connection.rpcEndpoint)
+      .use(irysUploader());
+    
+    // Create signer from keypair
+    const payerSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
+    
+    // Set payer as identity
+    umi.use(signerIdentity(payerSigner));
+    
+    console.log('Uploading metadata to Arweave via Irys...');
+    
+    // Upload metadata JSON
+    const metadataUri = await umi.uploader.uploadJson(metadata);
+    console.log(`Metadata uploaded to: ${metadataUri}`);
+    
+    return metadataUri;
+  } catch (error) {
+    console.error('Error uploading metadata:', error);
+    throw error;
+  }
+}
+
+/**
+ * Upload an image to Arweave via Irys
+ * @param connection Solana connection
+ * @param payer Keypair of the payer
+ * @param imagePath Path to the image file
+ * @returns URI of the uploaded image
+ */
+export async function uploadImage(
+  connection: Connection,
+  payer: Keypair,
+  imagePath: string
+): Promise<string> {
+  try {
+    // Create Umi instance with RPC endpoint and Irys uploader
+    const umi = createUmi(connection.rpcEndpoint)
+      .use(irysUploader());
+    
+    // Create signer from keypair
+    const payerSigner = createSignerFromKeypair(umi, fromWeb3JsKeypair(payer));
+    
+    // Set payer as identity
+    umi.use(signerIdentity(payerSigner));
+    
+    // Read image file
+    const imageFile = fs.readFileSync(imagePath);
+    const fileExtension = path.extname(imagePath).substring(1); // Remove the dot
+    
+    // Determine content type based on file extension
+    let contentType = 'image/png'; // Default
+    if (fileExtension === 'jpg' || fileExtension === 'jpeg') {
+      contentType = 'image/jpeg';
+    } else if (fileExtension === 'gif') {
+      contentType = 'image/gif';
+    } else if (fileExtension === 'svg') {
+      contentType = 'image/svg+xml';
+    }
+    
+    // Create generic file
+    const umiImageFile = createGenericFile(
+      imageFile, 
+      path.basename(imagePath), 
+      { tags: [{ name: 'Content-Type', value: contentType }] }
+    );
+    
+    console.log('Uploading image to Arweave via Irys...');
+    
+    // Upload image
+    const imageUriArray = await umi.uploader.upload([umiImageFile]);
+    const imageUri = imageUriArray[0];
+    console.log(`Image uploaded to: ${imageUri}`);
+    
+    return imageUri;
+  } catch (error) {
+    console.error('Error uploading image:', error);
+    throw error;
+  }
+}
 
 /**
  * Create metadata for a token
