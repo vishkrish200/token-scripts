@@ -9,7 +9,7 @@ import {
   getAccount,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
-import { loadKeypair } from '../../utils/wallet';
+import { loadWallet } from '../../utils/wallet';
 import { getEnvironment, logEnvironmentInfo, config } from '../../config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -57,7 +57,7 @@ async function main() {
     const tokenNameArg = options.name || process.argv.find(arg => arg.startsWith('--name='))?.split('=')[1];
     
     // Load keypair
-    const keypair = loadKeypair(walletArg);
+    const keypair = loadWallet(walletArg);
     const publicKey = keypair.publicKey;
     
     console.log(`Wallet: ${publicKey.toBase58()}`);

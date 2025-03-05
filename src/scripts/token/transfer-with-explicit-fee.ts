@@ -1,55 +1,47 @@
 #!/usr/bin/env ts-node
+import { Command } from 'commander';
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { 
-  TOKEN_2022_PROGRAM_ID, 
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-  createAssociatedTokenAccountInstruction,
-  getAccount,
-  getMint,
-  getTransferFeeConfig,
-  createTransferCheckedWithFeeInstruction
-} from '@solana/spl-token';
-import * as fs from 'fs';
-import * as path from 'path';
-import { program } from 'commander';
+import { TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, getMint, getAccount, createAssociatedTokenAccountInstruction, createTransferCheckedWithFeeInstruction, getTransferFeeConfig } from '@solana/spl-token';
 import chalk from 'chalk';
 import ora from 'ora';
 import { loadWallet, loadWalletFromPrivateKey, loadWalletFromEnv, loadWalletFromFile } from '../../utils/wallet';
 
+// Parse command line arguments
+const program = new Command();
 program
-  .name('transfer-checked')
-  .description('Transfer tokens with checked instruction')
-  .option('--env <string>', 'Solana cluster environment', 'testnet')
-  .option('--wallet <string>', 'Wallet name')
-  .option('--private-key <string>', 'Private key as a JSON array of numbers')
+  .option('-e, --env <string>', 'Solana cluster environment', 'devnet')
+  .option('-w, --wallet <string>', 'Wallet name')
+  .option('-k, --private-key <string>', 'Private key')
   .option('--private-key-env <string>', 'Environment variable containing the private key')
-  .option('--private-key-file <string>', 'Path to a file containing the private key')
-  .option('--mint <string>', 'Token mint address')
-  .option('--recipient <string>', 'Recipient wallet address')
-  .option('--amount <number>', 'Amount of tokens to transfer')
+  .option('--private-key-file <string>', 'File containing the private key')
+  .option('-m, --mint <string>', 'Token mint address')
+  .option('-r, --recipient <string>', 'Recipient address')
+  .option('-a, --amount <number>', 'Amount to transfer', parseFloat)
+  .option('--helius-api-key <string>', 'Helius API key')
   .parse(process.argv);
 
 const options = program.opts();
 
-// Get RPC URL based on environment
+// Function to get the RPC URL based on the environment
 function getRpcUrl(env: string): string {
   switch (env) {
-    case 'mainnet-beta':
-      return 'https://api.mainnet-beta.solana.com';
-    case 'testnet':
-      return 'https://api.testnet.solana.com';
+    case 'mainnet':
+      return options.heliusApiKey 
+        ? `https://mainnet.helius-rpc.com/?api-key=${options.heliusApiKey}`
+        : 'https://api.mainnet-beta.solana.com';
     case 'devnet':
       return 'https://api.devnet.solana.com';
+    case 'testnet':
+      return 'https://api.testnet.solana.com';
     case 'local':
       return 'http://localhost:8899';
     default:
-      return 'https://api.testnet.solana.com';
+      return env; // Assume it's a custom RPC URL
   }
 }
 
 async function main() {
-  console.log(chalk.green('Transferring tokens with fee...'));
+  console.log(chalk.green('Transferring tokens with explicit fee calculation...'));
   
   // Check required parameters
   if (!options.wallet && !options.privateKey && !options.privateKeyEnv && !options.privateKeyFile) {
@@ -137,8 +129,6 @@ async function main() {
     sourceAccount = await getAccount(connection, sourceTokenAccount, undefined, TOKEN_2022_PROGRAM_ID);
     console.log(chalk.blue(`Source token account: ${sourceAccount.address.toString()}`));
     console.log(chalk.blue(`Source token balance: ${Number(sourceAccount.amount) / 10**mintInfo.decimals}`));
-    
-    // We'll check for sufficient balance after calculating the fee
   } catch (error) {
     console.error(chalk.red(`Source token account not found: ${error}`));
     process.exit(1);
@@ -168,9 +158,11 @@ async function main() {
   transaction.feePayer = wallet.publicKey;
   
   // Check if the destination token account exists
+  let destinationAccountExists = false;
   try {
     await getAccount(connection, destinationTokenAccount, undefined, TOKEN_2022_PROGRAM_ID);
     console.log(chalk.blue(`Destination token account exists: ${destinationTokenAccount.toString()}`));
+    destinationAccountExists = true;
   } catch (error) {
     // If the account doesn't exist, create it
     console.log(chalk.blue(`Creating destination token account: ${destinationTokenAccount.toString()}`));
@@ -219,15 +211,9 @@ async function main() {
     }
   } catch (error) {
     console.log(chalk.yellow(`No transfer fee config found: ${error}`));
-    
-    // Even without a fee config, check if we have enough for the transfer
-    if (sourceAccount.amount < amount) {
-      console.error(chalk.red(`Insufficient token balance. You have ${Number(sourceAccount.amount) / 10**mintInfo.decimals} tokens, but tried to transfer ${options.amount} tokens.`));
-      process.exit(1);
-    }
   }
   
-  // Add the transfer instruction with fee
+  // Add the transfer instruction with explicit fee
   transaction.add(
     createTransferCheckedWithFeeInstruction(
       sourceTokenAccount,
@@ -236,7 +222,7 @@ async function main() {
       wallet.publicKey,
       amount,
       mintInfo.decimals,
-      fee, // Use our calculated fee instead of BigInt(0)
+      fee, // Explicitly set the fee we calculated
       [],
       TOKEN_2022_PROGRAM_ID
     )
@@ -282,4 +268,4 @@ async function main() {
 main().catch(err => {
   console.error(chalk.red('Error:'), err);
   process.exit(1);
-});
+}); 

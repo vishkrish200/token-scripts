@@ -63,7 +63,7 @@ async function main() {
     
     // Get mint info
     console.log('\nFetching mint information...');
-    const mintInfo = await getMint(connection, mintPubkey);
+    const mintInfo = await getMint(connection, mintPubkey, undefined, TOKEN_2022_PROGRAM_ID);
     
     console.log('\nMint Information:');
     console.log('----------------');
@@ -92,25 +92,87 @@ async function main() {
     // If wallet is provided, check its token account
     if (wallet) {
       try {
+        console.log('\nToken Account Information:');
+        console.log('------------------------');
+        
+        // Use getTokenAccountsByOwner which is more reliable than getAssociatedTokenAddress
         const tokenAccounts = await connection.getTokenAccountsByOwner(wallet.publicKey, { mint: mintPubkey });
         
         if (tokenAccounts.value.length > 0) {
-          console.log('\nToken Account Information:');
-          console.log('------------------------');
-          
           for (const { pubkey, account } of tokenAccounts.value) {
-            const accountInfo = await getAccount(connection, pubkey);
-            console.log(`\nAccount Address: ${pubkey.toBase58()}`);
-            console.log(`Balance: ${accountInfo.amount} tokens`);
-            console.log(`Delegate: ${accountInfo.delegate?.toBase58() || 'None'}`);
-            console.log(`Close Authority: ${accountInfo.closeAuthority?.toBase58() || 'None'}`);
+            try {
+              const accountInfo = await getAccount(connection, pubkey, undefined, TOKEN_2022_PROGRAM_ID);
+              console.log(`\nAccount Address: ${pubkey.toBase58()}`);
+              console.log(`Balance: ${Number(accountInfo.amount) / 10**mintInfo.decimals} tokens`);
+              console.log(`Delegate: ${accountInfo.delegate?.toBase58() || 'None'}`);
+              console.log(`Close Authority: ${accountInfo.closeAuthority?.toBase58() || 'None'}`);
+              
+              // Check for withheld fees if this is a token 2022 account
+              try {
+                // @ts-ignore - extensions property exists on Token2022 accounts
+                const withheldAmount = accountInfo.extensions?.transferFeeAmount?.withheldAmount;
+                if (withheldAmount) {
+                  console.log(`Withheld Fees: ${Number(withheldAmount) / 10**mintInfo.decimals} tokens`);
+                }
+              } catch (error: any) {
+                // No withheld fees extension
+              }
+            } catch (error: any) {
+              console.log(`\nCould not parse token account ${pubkey.toBase58()}: ${error.message}`);
+            }
           }
         } else {
-          console.log('\nNo token accounts found for this wallet.');
+          // Try to get the associated token account directly
+          try {
+            const associatedTokenAccount = getAssociatedTokenAddressSync(
+              mintPubkey,
+              wallet.publicKey,
+              false,
+              TOKEN_2022_PROGRAM_ID
+            );
+            
+            console.log(`\nChecking associated token account: ${associatedTokenAccount.toBase58()}`);
+            
+            try {
+              const accountInfo = await getAccount(connection, associatedTokenAccount, undefined, TOKEN_2022_PROGRAM_ID);
+              console.log(`Balance: ${Number(accountInfo.amount) / 10**mintInfo.decimals} tokens`);
+            } catch (error: any) {
+              console.log(`Associated token account not found or not initialized: ${error.message}`);
+              console.log(`You may need to create this account first by sending tokens to this address.`);
+            }
+          } catch (error: any) {
+            console.log(`Error getting associated token account: ${error.message}`);
+          }
+          
+          console.log('\nNo token accounts found for this wallet and mint.');
         }
       } catch (error) {
         console.error('Error fetching token accounts:', error);
+        
+        // Try to get the associated token account as a fallback
+        try {
+          const associatedTokenAccount = getAssociatedTokenAddressSync(
+            mintPubkey,
+            wallet.publicKey,
+            false,
+            TOKEN_2022_PROGRAM_ID
+          );
+          
+          console.log(`\nTrying associated token account: ${associatedTokenAccount.toBase58()}`);
+          
+          try {
+            const accountInfo = await getAccount(connection, associatedTokenAccount, undefined, TOKEN_2022_PROGRAM_ID);
+            console.log(`Balance: ${Number(accountInfo.amount) / 10**mintInfo.decimals} tokens`);
+          } catch (error: any) {
+            console.log(`Associated token account not found or not initialized: ${error.message}`);
+            console.log(`You may need to create this account first by sending tokens to this address.`);
+          }
+        } catch (error: any) {
+          console.log(`Error getting associated token account: ${error.message}`);
+        }
       }
+    } else {
+      console.log('\nNo wallet provided. Skipping token account check.');
     }
   } catch (error) {
     console.error('Error checking token extensions:', error);

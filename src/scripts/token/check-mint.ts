@@ -1,6 +1,7 @@
 #!/usr/bin/env ts-node
 import { Connection, PublicKey } from '@solana/web3.js';
 import { program } from 'commander';
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 
 program
   .option('--env <string>', 'Solana cluster environment', 'testnet')
@@ -56,8 +57,10 @@ async function main() {
     console.log(`- Data length: ${accountInfo.data.length} bytes`);
     
     // Check if it's a token mint account
-    if (accountInfo.owner.toString() === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') {
-      console.log('This is a valid SPL Token mint account.');
+    if (accountInfo.owner.toString() === TOKEN_PROGRAM_ID.toString()) {
+      console.log('This is a valid SPL Token mint account (Token Program).');
+    } else if (accountInfo.owner.toString() === TOKEN_2022_PROGRAM_ID.toString()) {
+      console.log('This is a valid SPL Token mint account (Token-2022 Program).');
     } else {
       console.log('This account is not owned by the SPL Token program.');
     }
